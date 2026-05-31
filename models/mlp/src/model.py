@@ -16,12 +16,16 @@ class MLP(pl.LightningModule):
         output_size = int(config["output_size"])
         self.forecast_horizon = int(config.get("forecast_horizon", 1))
         self.learning_rate = float(config.get("learning_rate", 1e-3))
+        self.dropout_rate = float(config.get("dropout", 0.0))
+        self.weight_decay = float(config.get("weight_decay", 1e-4))
 
         layers = [
             nn.Linear(num_inputs, hidden_units),
             nn.LayerNorm(hidden_units),
             nn.ReLU(),
         ]
+        if self.dropout_rate > 0:
+            layers.append(nn.Dropout(self.dropout_rate))
         for _ in range(max(0, hidden_layers - 1)):
             layers.extend(
                 [
@@ -30,6 +34,8 @@ class MLP(pl.LightningModule):
                     nn.ReLU(),
                 ]
             )
+            if self.dropout_rate > 0:
+                layers.append(nn.Dropout(self.dropout_rate))
         self.network = nn.Sequential(*layers)
         self.output_proj = nn.Linear(hidden_units, output_size)
 
@@ -76,4 +82,4 @@ class MLP(pl.LightningModule):
         return self._step(batch, "test")
 
     def configure_optimizers(self):
-        return optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
+        return optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
