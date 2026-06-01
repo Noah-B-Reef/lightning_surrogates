@@ -1,7 +1,7 @@
 import argparse
 import json
-import os
 import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
@@ -34,7 +34,43 @@ class MetricsHistoryLogger(pl.Callback):
                 self.history[key].append(float(value.detach().cpu()))
 
 
-def load_best_config(config_file="best_params.txt"):
+def resolve_split_dir(dataset_path):
+    """Resolve a split directory containing train.csv, val.csv, and test.csv."""
+    path = Path(dataset_path).expanduser().resolve()
+    if path.is_file():
+        path = path.parent
+    missing = [name for name in ("train.csv", "val.csv", "test.csv") if not (path / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing {missing} in split directory: {path}")
+    return path
+
+
+def parse_devices(devices):
+    if isinstance(devices, int):
+        return devices
+    if isinstance(devices, str) and devices.isdigit():
+        return int(devices)
+    return devices
+
+
+def load_best_config(config_file):
+    """Load model/training hyperparameters from JSON or key=value text."""
+    path = Path(config_file).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    if path.suffix == ".json":
+        payload = json.loads(path.read_text())
+        return {
+            "num_hidden_layers": int(payload["num_hidden_layers"]),
+            "num_neurons_per_hidden_layer": int(payload["num_neurons_per_hidden_layer"]),
+            "learning_rate": float(payload["learning_rate"]),
+            "batch_size": int(payload["batch_size"]),
+            "forecast_horizon": int(payload.get("forecast_horizon", config.FORECAST_HORIZON)),
+            "dropout": float(payload.get("dropout", config.DROPOUT)),
+            "weight_decay": float(payload.get("weight_decay", config.WEIGHT_DECAY)),
+        }
+
     key_mapping = {
         "num_layers": "num_hidden_layers",
         "hidden_units": "num_neurons_per_hidden_layer",
@@ -43,43 +79,46 @@ def load_best_config(config_file="best_params.txt"):
         "learning_rate": "learning_rate",
         "batch_size": "batch_size",
         "forecast_horizon": "forecast_horizon",
+        "dropout": "dropout",
+        "weight_decay": "weight_decay",
     }
-    search_paths = [
-        config_file,
-        os.path.join("results", "optimization_results", config_file),
-        os.path.join("results", "optuna", config_file),
-    ]
-    for path in search_paths:
-        if not os.path.exists(path):
+    params = {}
+    for line in path.read_text().splitlines():
+        if "=" not in line:
             continue
-        params = {}
-        with open(path) as f:
-            for line in f:
-                if "=" not in line:
-                    continue
-                key, value = line.strip().split("=", 1)
-                key = key_mapping.get(key, key)
-                if key in {
-                    "num_hidden_layers",
-                    "num_neurons_per_hidden_layer",
-                    "batch_size",
-                    "forecast_horizon",
-                }:
-                    params[key] = int(float(value))
-                elif key == "learning_rate":
-                    params[key] = float(value)
-        if params:
-            return params
+        key, value = line.strip().split("=", 1)
+        key = key_mapping.get(key, key)
+        if key in {
+            "num_hidden_layers",
+            "num_neurons_per_hidden_layer",
+            "batch_size",
+            "forecast_horizon",
+        }:
+            params[key] = int(float(value))
+        elif key in {"learning_rate", "dropout", "weight_decay"}:
+            params[key] = float(value)
+    if not params:
+        raise ValueError(f"No hyperparameters found in {path}")
+    params.setdefault("forecast_horizon", config.FORECAST_HORIZON)
+    params.setdefault("dropout", config.DROPOUT)
+    params.setdefault("weight_decay", config.WEIGHT_DECAY)
+    return params
+
+
+def default_config():
     return {
         "num_hidden_layers": config.NUM_LAYERS,
         "num_neurons_per_hidden_layer": config.HIDDEN_UNITS,
         "learning_rate": config.LEARNING_RATE,
         "batch_size": config.BATCH_SIZE,
         "forecast_horizon": config.FORECAST_HORIZON,
+        "dropout": config.DROPOUT,
+        "weight_decay": config.WEIGHT_DECAY,
     }
 
 
 def plot_history(history, output_path):
+    output_path = Path(output_path)
     plt.figure(figsize=(10, 6))
     if history["train_loss"]:
         plt.plot(history["train_loss"], label="Train loss")
@@ -98,37 +137,42 @@ def plot_history(history, output_path):
 
 def train_final_model(
     best_config,
+    split_dir,
+    results_dir,
+    *,
     num_epochs=None,
-    checkpoint_path="mlp_grav_collapse.ckpt",
-    results_dir="results",
-    data_dir=None,
+    checkpoint_name="mlp_grav_collapse.ckpt",
     save_epoch_checkpoints=True,
     accelerator=config.ACCELERATOR,
     devices=config.NUM_DEVICES,
     precision=config.PRECISION,
+    num_workers=config.NUM_WORKERS,
 ):
+    split_dir = resolve_split_dir(split_dir)
+    results_dir = Path(results_dir).expanduser().resolve()
+    results_dir.mkdir(parents=True, exist_ok=True)
     num_epochs = int(num_epochs or config.EPOCHS)
-    data_dir = data_dir or str(config.DEFAULT_SPLIT_DIR)
-    os.makedirs(results_dir, exist_ok=True)
 
-    log_dir = os.path.join(results_dir, "lightning_logs", "mlp_grav_collapse")
-    if os.path.exists(log_dir):
+    log_dir = results_dir / "lightning_logs" / "mlp_grav_collapse"
+    if log_dir.exists():
         shutil.rmtree(log_dir)
 
     data = GravCollapseDataModule(
-        data_dir=data_dir,
-        batch_size=best_config["batch_size"],
-        num_workers=config.NUM_WORKERS,
-        forecast_horizon=best_config.get("forecast_horizon", config.FORECAST_HORIZON),
+        data_dir=str(split_dir),
+        batch_size=int(best_config["batch_size"]),
+        num_workers=int(num_workers),
+        forecast_horizon=int(best_config.get("forecast_horizon", config.FORECAST_HORIZON)),
     )
     data.setup("fit")
     model_config = {
         "num_inputs": data.num_features,
         "output_size": data.num_targets,
-        "forecast_horizon": best_config.get("forecast_horizon", config.FORECAST_HORIZON),
-        "num_hidden_layers": best_config["num_hidden_layers"],
-        "num_neurons_per_hidden_layer": best_config["num_neurons_per_hidden_layer"],
-        "learning_rate": best_config["learning_rate"],
+        "forecast_horizon": int(best_config.get("forecast_horizon", config.FORECAST_HORIZON)),
+        "num_hidden_layers": int(best_config["num_hidden_layers"]),
+        "num_neurons_per_hidden_layer": int(best_config["num_neurons_per_hidden_layer"]),
+        "learning_rate": float(best_config["learning_rate"]),
+        "dropout": float(best_config.get("dropout", config.DROPOUT)),
+        "weight_decay": float(best_config.get("weight_decay", config.WEIGHT_DECAY)),
     }
     model = MLP(model_config)
 
@@ -137,7 +181,7 @@ def train_final_model(
         RelativeImprovementEarlyStopping(monitor="val_loss", patience=8, mode="min"),
         ModelCheckpoint(
             monitor="val_loss",
-            dirpath=os.path.join(results_dir, "checkpoints"),
+            dirpath=str(results_dir / "checkpoints"),
             filename="mlp_best-{epoch:04d}-{val_loss:.5f}",
             save_top_k=1,
             mode="min",
@@ -147,7 +191,7 @@ def train_final_model(
     if save_epoch_checkpoints:
         callbacks.append(
             ModelCheckpoint(
-                dirpath=os.path.join(results_dir, "epoch_checkpoints"),
+                dirpath=str(results_dir / "epoch_checkpoints"),
                 filename="epoch-{epoch:04d}",
                 save_top_k=-1,
                 every_n_epochs=1,
@@ -157,11 +201,11 @@ def train_final_model(
     trainer = pl.Trainer(
         max_epochs=num_epochs,
         accelerator=accelerator,
-        devices=devices,
+        devices=parse_devices(devices),
         precision=precision,
         callbacks=callbacks,
         logger=TensorBoardLogger(
-            save_dir=os.path.join(results_dir, "lightning_logs"),
+            save_dir=str(results_dir / "lightning_logs"),
             name="mlp_grav_collapse",
         ),
         gradient_clip_val=1.0,
@@ -169,60 +213,87 @@ def train_final_model(
     )
     trainer.fit(model, datamodule=data)
 
-    final_checkpoint = os.path.join(results_dir, checkpoint_path)
+    final_checkpoint = results_dir / checkpoint_name
     best_checkpoint = callbacks[1].best_model_path
     if best_checkpoint:
         shutil.copy2(best_checkpoint, final_checkpoint)
     else:
         trainer.save_checkpoint(final_checkpoint)
 
-    with open(os.path.join(results_dir, "trained_model_config.json"), "w") as f:
-        json.dump(model_config, f, indent=2)
-    plot_history(metrics.history, os.path.join(results_dir, "loss_curves.png"))
-    return model, trainer
+    (results_dir / "trained_model_config.json").write_text(json.dumps(model_config, indent=2))
+    plot_history(metrics.history, results_dir / "loss_curves.png")
+    return {
+        "checkpoint": str(final_checkpoint),
+        "best_checkpoint": best_checkpoint,
+        "model_config": model_config,
+        "split_dir": str(split_dir),
+        "results_dir": str(results_dir),
+    }
 
 
 def main(
+    dataset_path=None,
     num_epochs=None,
-    config_file="best_params.txt",
-    checkpoint_path="mlp_grav_collapse.ckpt",
+    config_file=None,
+    checkpoint_name="mlp_grav_collapse.ckpt",
     use_defaults=False,
-    results_dir="results",
+    results_dir=config.DEFAULT_RESULTS_DIR,
     data_dir=None,
+    accelerator=config.ACCELERATOR,
+    devices=config.NUM_DEVICES,
+    precision=config.PRECISION,
+    num_workers=config.NUM_WORKERS,
+    save_epoch_checkpoints=True,
 ):
+    split_dir = data_dir or dataset_path
+    if split_dir is None:
+        raise ValueError("Provide a split dataset path as dataset_path or data_dir.")
     if use_defaults:
-        best_config = {
-            "num_hidden_layers": config.NUM_LAYERS,
-            "num_neurons_per_hidden_layer": config.HIDDEN_UNITS,
-            "learning_rate": config.LEARNING_RATE,
-            "batch_size": config.BATCH_SIZE,
-            "forecast_horizon": config.FORECAST_HORIZON,
-        }
+        best_config = default_config()
     else:
+        if config_file is None:
+            config_file = Path(results_dir) / "optimization" / "best_params.json"
         best_config = load_best_config(config_file)
     return train_final_model(
         best_config,
+        split_dir,
+        results_dir,
         num_epochs=num_epochs,
-        checkpoint_path=checkpoint_path,
-        results_dir=results_dir,
-        data_dir=data_dir,
+        checkpoint_name=checkpoint_name,
+        save_epoch_checkpoints=save_epoch_checkpoints,
+        accelerator=accelerator,
+        devices=devices,
+        precision=precision,
+        num_workers=num_workers,
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Train the MLP on a split dataset directory.")
+    parser.add_argument("dataset_path", nargs="?", default=None)
+    parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--config-file", type=str, default="best_params.txt")
+    parser.add_argument("--config-file", type=Path, default=None)
     parser.add_argument("--checkpoint", type=str, default="mlp_grav_collapse.ckpt")
     parser.add_argument("--use-defaults", action="store_true")
-    parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--data-dir", type=str, default=None)
+    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR)
+    parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
+    parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
+    parser.add_argument("--devices", default=config.NUM_DEVICES)
+    parser.add_argument("--precision", default=config.PRECISION)
+    parser.add_argument("--no-epoch-checkpoints", action="store_true")
     args = parser.parse_args()
     main(
+        dataset_path=args.dataset_path,
         num_epochs=args.epochs,
         config_file=args.config_file,
-        checkpoint_path=args.checkpoint,
+        checkpoint_name=args.checkpoint,
         use_defaults=args.use_defaults,
         results_dir=args.results_dir,
         data_dir=args.data_dir,
+        accelerator=args.accelerator,
+        devices=args.devices,
+        precision=args.precision,
+        num_workers=args.num_workers,
+        save_epoch_checkpoints=not args.no_epoch_checkpoints,
     )

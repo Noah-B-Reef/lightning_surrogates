@@ -11,14 +11,26 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "${SCRIPT_DIR}"
 
 # Allow overrides at submission time, for example:
 #   sbatch --export=ALL,DATA_DIR=/path/to/split,RESULTS_DIR=/path/to/results run.slurm
-DATA_DIR="${DATA_DIR:-/Users/nreef/research/datasets/sampled_datasets/random}"
-RESULTS_DIR="${RESULTS_DIR:-results}"
-OPTUNA_RESULTS_DIR="${OPTUNA_RESULTS_DIR:-${RESULTS_DIR}/optimization_results}"
+DATA_DIR="${DATA_DIR:-}"
+RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
+OPTUNA_RESULTS_DIR="${OPTUNA_RESULTS_DIR:-${RESULTS_DIR}/optimization}"
 CHECKPOINT_NAME="${CHECKPOINT_NAME:-mlp_grav_collapse.ckpt}"
+N_TRIALS="${N_TRIALS:-25}"
+TUNE_EPOCHS="${TUNE_EPOCHS:-50}"
+TRAIN_EPOCHS="${TRAIN_EPOCHS:-100}"
+ACCELERATOR="${ACCELERATOR:-gpu}"
+DEVICES="${DEVICES:-1}"
+NUM_WORKERS="${NUM_WORKERS:-7}"
+
+if [ -z "${DATA_DIR}" ]; then
+    echo "DATA_DIR must point to a split directory containing train.csv, val.csv, and test.csv."
+    exit 2
+fi
 
 mkdir -p "${RESULTS_DIR}" "${OPTUNA_RESULTS_DIR}"
 
@@ -27,17 +39,25 @@ mkdir -p "${RESULTS_DIR}" "${OPTUNA_RESULTS_DIR}"
 conda activate mlp_torch
 
 python src/optimize.py \
-    --data-dir "${DATA_DIR}" \
-    --results-dir "${OPTUNA_RESULTS_DIR}"
+    "${DATA_DIR}" \
+    --results-dir "${OPTUNA_RESULTS_DIR}" \
+    --num-trials "${N_TRIALS}" \
+    --tune-epochs "${TUNE_EPOCHS}" \
+    --accelerator "${ACCELERATOR}" \
+    --devices "${DEVICES}" \
+    --num-workers "${NUM_WORKERS}"
 
 python src/train.py \
-    --data-dir "${DATA_DIR}" \
+    "${DATA_DIR}" \
     --results-dir "${RESULTS_DIR}" \
-    --config-file "${OPTUNA_RESULTS_DIR}/best_params.txt" \
-    --checkpoint "${CHECKPOINT_NAME}"
+    --config-file "${OPTUNA_RESULTS_DIR}/best_params.json" \
+    --checkpoint "${CHECKPOINT_NAME}" \
+    --epochs "${TRAIN_EPOCHS}" \
+    --accelerator "${ACCELERATOR}" \
+    --devices "${DEVICES}" \
+    --num-workers "${NUM_WORKERS}"
 
 python src/test.py \
-    --model_checkpoint "${RESULTS_DIR}/${CHECKPOINT_NAME}" \
-    --test_dir "${DATA_DIR}/test.csv" \
-    --output_dir "${RESULTS_DIR}/test_results" \
-    --epoch_checkpoint_dir "${RESULTS_DIR}/epoch_checkpoints"
+    "${DATA_DIR}" \
+    --model-checkpoint "${RESULTS_DIR}/${CHECKPOINT_NAME}" \
+    --output-dir "${RESULTS_DIR}/test_results"

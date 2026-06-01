@@ -1,7 +1,6 @@
 import argparse
 import json
-import os
-import shutil
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +12,20 @@ from model import MLP
 
 
 DEFAULT_SPECIES = ["H", "H2", "O", "C", "N", "CL", "E_minus", "CO", "MG", "#C", "H2O", "SI"]
+
+
+def resolve_test_csv(data_dir=None, test_csv=None):
+    if test_csv is not None:
+        path = Path(test_csv).expanduser().resolve()
+    elif data_dir is not None:
+        path = Path(data_dir).expanduser().resolve()
+        if path.is_dir():
+            path = path / "test.csv"
+    else:
+        raise ValueError("Provide --data-dir or --test-dir/--test-csv.")
+    if not path.is_file():
+        raise FileNotFoundError(f"Test CSV not found: {path}")
+    return path
 
 
 def load_dataset(csv_path):
@@ -31,7 +44,7 @@ def load_dataset(csv_path):
 def aliases(species):
     values = [species]
     if species == "E_minus":
-        values.extend(["E-", "E"])
+        values.extend(["E-", "E"] )
     if species.startswith("#"):
         values.append("@" + species[1:])
     return values
@@ -87,15 +100,22 @@ def plot_rollout(tracer, time, true_vals, pred_vals, species, path):
     plt.close(fig)
 
 
-def main(model_checkpoint, test_dir, output_dir, epoch_checkpoint_dir=None, species=None, num_tracers=10):
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-    model = MLP.load_from_checkpoint(model_checkpoint)
+def main(
+    model_checkpoint,
+    data_dir=None,
+    output_dir="results/test_results",
+    test_dir=None,
+    species=None,
+    num_tracers=10,
+):
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    test_csv = resolve_test_csv(data_dir=data_dir, test_csv=test_dir)
+    model = MLP.load_from_checkpoint(str(Path(model_checkpoint).expanduser().resolve()))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    data, phys_cols, abundance_cols = load_dataset(test_dir)
+    data, phys_cols, abundance_cols = load_dataset(test_csv)
     selected_species = resolve_species(species or DEFAULT_SPECIES, abundance_cols)
     selected_idx = [abundance_cols.index(name) for name in selected_species]
     predictions = []
@@ -121,9 +141,13 @@ def main(model_checkpoint, test_dir, output_dir, epoch_checkpoint_dir=None, spec
         pred_df.loc[:, abundance_cols] = pred
         predictions.append(pred_df)
 
+    if not all_errors:
+        raise RuntimeError("No valid test tracers were available for rollout.")
+
     all_errors = np.concatenate(all_errors, axis=0)
     species_mse = np.mean(all_errors, axis=0)
     summary = {
+        "test_csv": str(test_csv),
         "num_tracers": len(tracer_errors),
         "overall_mse": float(np.mean(all_errors)),
         "min_tracer_mse": float(min(row["mse"] for row in tracer_errors)),
@@ -131,21 +155,20 @@ def main(model_checkpoint, test_dir, output_dir, epoch_checkpoint_dir=None, spec
         "max_tracer_mse": float(max(row["mse"] for row in tracer_errors)),
         "plot_species": selected_species,
     }
-    pd.DataFrame(tracer_errors).to_csv(os.path.join(output_dir, "tracer_errors.csv"), index=False)
+    pd.DataFrame(tracer_errors).to_csv(output_dir / "tracer_errors.csv", index=False)
     pd.DataFrame({"species": abundance_cols, "mse": species_mse}).to_csv(
-        os.path.join(output_dir, "species_mse.csv"), index=False
+        output_dir / "species_mse.csv", index=False
     )
     pd.concat(predictions, ignore_index=True).to_csv(
-        os.path.join(output_dir, "test_predictions_log10.csv"), index=False
+        output_dir / "test_predictions_log10.csv", index=False
     )
-    with open(os.path.join(output_dir, "error_summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+    (output_dir / "error_summary.json").write_text(json.dumps(summary, indent=2))
 
     if selected_species:
         ranked = sorted(tracer_errors, key=lambda row: row["mse"])
-        half = max(1, num_tracers // 2)
-        plot_dir = os.path.join(output_dir, "rollouts")
-        os.makedirs(plot_dir, exist_ok=True)
+        half = max(1, int(num_tracers) // 2)
+        plot_dir = output_dir / "rollouts"
+        plot_dir.mkdir(exist_ok=True)
         for row in ranked[:half] + ranked[-half:]:
             tracer = row["tracer"]
             tracer_df = data[data["Tracer"] == tracer].reset_index(drop=True)
@@ -156,25 +179,27 @@ def main(model_checkpoint, test_dir, output_dir, epoch_checkpoint_dir=None, spec
                 true[:, selected_idx],
                 pred[:, selected_idx],
                 selected_species,
-                os.path.join(plot_dir, f"rollout_tracer_{tracer}.png"),
+                plot_dir / f"rollout_tracer_{tracer}.png",
             )
     print(json.dumps(summary, indent=2))
+    return summary
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_checkpoint", type=str, default="results/mlp_grav_collapse.ckpt")
-    parser.add_argument("--test_dir", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, default="results/test_results")
-    parser.add_argument("--epoch_checkpoint_dir", type=str, default=None)
+    parser = argparse.ArgumentParser(description="Evaluate an MLP checkpoint with autoregressive rollout.")
+    parser.add_argument("dataset_path", nargs="?", default=None, help="Split directory containing test.csv.")
+    parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
+    parser.add_argument("--model-checkpoint", "--model_checkpoint", type=Path, default="results/mlp_grav_collapse.ckpt")
+    parser.add_argument("--test-dir", "--test_dir", "--test-csv", type=Path, default=None)
+    parser.add_argument("--output-dir", "--output_dir", type=Path, default="results/test_results")
     parser.add_argument("--species", nargs="+", default=DEFAULT_SPECIES)
-    parser.add_argument("--num_tracers", type=int, default=10)
+    parser.add_argument("--num-tracers", "--num_tracers", type=int, default=10)
     args = parser.parse_args()
     main(
-        args.model_checkpoint,
-        args.test_dir,
-        args.output_dir,
-        args.epoch_checkpoint_dir,
-        args.species,
-        args.num_tracers,
+        model_checkpoint=args.model_checkpoint,
+        data_dir=args.data_dir or args.dataset_path,
+        output_dir=args.output_dir,
+        test_dir=args.test_dir,
+        species=args.species,
+        num_tracers=args.num_tracers,
     )
