@@ -2,7 +2,8 @@
 
 This script intentionally does not run samplers. Generate candidate split
 folders elsewhere, choose one, then pass its path here. The split directory must
-contain train.csv, val.csv, and test.csv.
+contain train.csv, val.csv, and test.csv. With no path it defaults to the
+best-sampler split exported by the samplers benchmark.
 """
 
 import argparse
@@ -13,6 +14,9 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR / "src"))
+
+import config
 
 
 def run_step(step_num, name, command, skip=False):
@@ -26,19 +30,16 @@ def run_step(step_num, name, command, skip=False):
     print(f"=== Step {step_num} complete ({elapsed}s) ===", flush=True)
 
 
-def resolve_split_dir(dataset_path):
-    path = Path(dataset_path).expanduser().resolve()
-    missing = [name for name in ("train.csv", "val.csv", "test.csv") if not (path / name).is_file()]
-    if missing:
-        raise FileNotFoundError(f"Missing {missing} in split directory: {path}")
-    return path
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Run Optuna, final training, and rollout testing for an MLP split dataset."
     )
-    parser.add_argument("dataset_path", help="Split directory containing train.csv, val.csv, and test.csv.")
+    parser.add_argument(
+        "dataset_path",
+        nargs="?",
+        default=None,
+        help="Split directory with train/val/test.csv (default: best-sampler split).",
+    )
     parser.add_argument("--results-dir", type=Path, default=SCRIPT_DIR / "results")
     parser.add_argument("--optuna-results-dir", type=Path, default=None)
     parser.add_argument("--checkpoint", type=str, default="mlp_grav_collapse.ckpt")
@@ -53,7 +54,7 @@ def main():
     parser.add_argument("--skip-test", action="store_true")
     args = parser.parse_args()
 
-    split_dir = resolve_split_dir(args.dataset_path)
+    split_dir = config.resolve_split_dir(args.dataset_path)
     results_dir = args.results_dir.expanduser().resolve()
     optuna_dir = (
         args.optuna_results_dir.expanduser().resolve()

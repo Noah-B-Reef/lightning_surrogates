@@ -12,6 +12,8 @@ test.csv
 
 The sampler repository can generate several candidate split directories, but choosing which split to use is a user decision.
 
+When no split path is given, every script defaults to the best-sampler split exported by the samplers benchmark at `datasets/sampled_datasets/best_sampler/` (override with `MLP_DATA_DIR`). That directory does not exist until `run_sampler_benchmark.py` has been run; until then the scripts raise an error pointing you to that benchmark. So `python run_benchmark.py` with no arguments runs against the best sampler automatically.
+
 ## Optimize Hyperparameters
 
 ```bash

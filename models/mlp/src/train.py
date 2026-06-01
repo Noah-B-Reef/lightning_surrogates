@@ -34,17 +34,6 @@ class MetricsHistoryLogger(pl.Callback):
                 self.history[key].append(float(value.detach().cpu()))
 
 
-def resolve_split_dir(dataset_path):
-    """Resolve a split directory containing train.csv, val.csv, and test.csv."""
-    path = Path(dataset_path).expanduser().resolve()
-    if path.is_file():
-        path = path.parent
-    missing = [name for name in ("train.csv", "val.csv", "test.csv") if not (path / name).is_file()]
-    if missing:
-        raise FileNotFoundError(f"Missing {missing} in split directory: {path}")
-    return path
-
-
 def parse_devices(devices):
     if isinstance(devices, int):
         return devices
@@ -148,7 +137,7 @@ def train_final_model(
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
 ):
-    split_dir = resolve_split_dir(split_dir)
+    split_dir = config.resolve_split_dir(split_dir)
     results_dir = Path(results_dir).expanduser().resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     num_epochs = int(num_epochs or config.EPOCHS)
@@ -246,8 +235,6 @@ def main(
     save_epoch_checkpoints=True,
 ):
     split_dir = data_dir or dataset_path
-    if split_dir is None:
-        raise ValueError("Provide a split dataset path as dataset_path or data_dir.")
     if use_defaults:
         best_config = default_config()
     else:

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+import config
 from data import PHYS_COLS
 from model import MLP
 
@@ -17,15 +18,12 @@ DEFAULT_SPECIES = ["H", "H2", "O", "C", "N", "CL", "E_minus", "CO", "MG", "#C", 
 def resolve_test_csv(data_dir=None, test_csv=None):
     if test_csv is not None:
         path = Path(test_csv).expanduser().resolve()
-    elif data_dir is not None:
-        path = Path(data_dir).expanduser().resolve()
-        if path.is_dir():
-            path = path / "test.csv"
-    else:
-        raise ValueError("Provide --data-dir or --test-dir/--test-csv.")
-    if not path.is_file():
-        raise FileNotFoundError(f"Test CSV not found: {path}")
-    return path
+        if not path.is_file():
+            raise FileNotFoundError(f"Test CSV not found: {path}")
+        return path
+    # No explicit test CSV: resolve the split directory (defaulting to the
+    # best-sampler split) and use its test.csv.
+    return config.resolve_split_dir(data_dir, required=("test.csv",)) / "test.csv"
 
 
 def load_dataset(csv_path):

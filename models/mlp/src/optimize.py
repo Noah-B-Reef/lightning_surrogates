@@ -12,17 +12,6 @@ from data import GravCollapseDataModule
 from model import MLP
 
 
-def resolve_split_dir(dataset_path):
-    """Resolve a split directory containing train.csv, val.csv, and test.csv."""
-    path = Path(dataset_path).expanduser().resolve()
-    if path.is_file():
-        path = path.parent
-    missing = [name for name in ("train.csv", "val.csv", "test.csv") if not (path / name).is_file()]
-    if missing:
-        raise FileNotFoundError(f"Missing {missing} in split directory: {path}")
-    return path
-
-
 def parse_devices(devices):
     if isinstance(devices, int):
         return devices
@@ -167,7 +156,7 @@ def main():
         "dataset_path",
         nargs="?",
         default=None,
-        help="Split directory containing train.csv, val.csv, and test.csv.",
+        help="Split directory with train/val/test.csv (default: best-sampler split).",
     )
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR / "optimization")
@@ -185,10 +174,7 @@ def main():
     args = parser.parse_args()
 
     dataset_path = args.data_dir or args.dataset_path
-    if dataset_path is None:
-        raise SystemExit("Provide a split dataset path as dataset_path or --data-dir.")
-
-    split_dir = resolve_split_dir(dataset_path)
+    split_dir = config.resolve_split_dir(dataset_path)
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
 
