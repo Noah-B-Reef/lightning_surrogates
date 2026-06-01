@@ -12,7 +12,7 @@ test.csv
 
 The sampler repository can generate several candidate split directories, but choosing which split to use is a user decision.
 
-When no split path is given, every script defaults to the best-sampler split exported by the samplers benchmark at `datasets/sampled_datasets/best_sampler/` (override with `MLP_DATA_DIR`). That directory does not exist until `run_sampler_benchmark.py` has been run; until then the scripts raise an error pointing you to that benchmark. So `python run_benchmark.py` with no arguments runs against the best sampler automatically.
+When no split path is given, every script defaults to the best-sampler split exported by the samplers benchmark at `<datasets>/sampled_datasets/best_sampler/`. The `<datasets>` root is the repo's sibling `datasets/` by default; on clusters where that relative layout does not hold (e.g. TACC `/work/...`), set `MLP_DATASETS_DIR` to the datasets root, or `MLP_DATA_DIR` straight to the split directory. That directory does not exist until `run_sampler_benchmark.py` has been run; until then the scripts raise an error pointing you to that benchmark. So `python run_benchmark.py` with no arguments runs against the best sampler automatically.
 
 ## Optimize Hyperparameters
 
@@ -96,7 +96,8 @@ This broadens capacity beyond the previous shallow/narrow defaults while avoidin
 
 ## Environment Variables
 
-- `MLP_DATA_DIR`: optional default split directory when no path is passed.
+- `MLP_DATASETS_DIR`: datasets root used to locate the default best-sampler split (defaults to the repo's sibling `datasets/`; set this on TACC).
+- `MLP_DATA_DIR`: optional default split directory when no path is passed (overrides `MLP_DATASETS_DIR`).
 - `MLP_RESULTS_DIR`: default MLP results directory.
 - `DATA_DIR`: split directory for `run_benchmark.sh` and `run.slurm`.
 - `RESULTS_DIR`: result root for `run_benchmark.sh` and `run.slurm`.

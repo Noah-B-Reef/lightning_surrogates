@@ -16,7 +16,8 @@ cd "${SCRIPT_DIR}"
 
 # Allow overrides at submission time, for example:
 #   sbatch --export=ALL,DATA_DIR=/path/to/split,RESULTS_DIR=/path/to/results run.slurm
-DATA_DIR="${DATA_DIR:-}"
+# Defaults to the best-sampler split exported by the samplers benchmark on vista.
+DATA_DIR="${DATA_DIR:-/work/10252/nbr525/vista/datasets/sampled_datasets/best_sampler}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
 OPTUNA_RESULTS_DIR="${OPTUNA_RESULTS_DIR:-${RESULTS_DIR}/optimization}"
 CHECKPOINT_NAME="${CHECKPOINT_NAME:-mlp_grav_collapse.ckpt}"

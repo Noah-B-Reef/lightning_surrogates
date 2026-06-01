@@ -6,7 +6,6 @@ SRC_DIR = Path(__file__).resolve().parent
 MLP_DIR = SRC_DIR.parent
 LIGHTNING_SURROGATES_DIR = SRC_DIR.parents[2]
 RESEARCH_DIR = SRC_DIR.parents[3]
-DEFAULT_DATASETS_DIR = RESEARCH_DIR / "datasets"
 
 
 def resolve_path(path):
@@ -15,6 +14,13 @@ def resolve_path(path):
 
 def env_path(name, default):
     return resolve_path(os.environ.get(name, default))
+
+
+# Root of the datasets tree. Defaults to the sibling `datasets/` of the repo,
+# which is correct for the local checkout. On clusters where that relative
+# layout does not hold (e.g. TACC /work), set MLP_DATASETS_DIR or point
+# MLP_DATA_DIR straight at the split directory.
+DEFAULT_DATASETS_DIR = env_path("MLP_DATASETS_DIR", RESEARCH_DIR / "datasets")
 
 
 # Model/training defaults
