@@ -1,10 +1,12 @@
 import argparse
 import json
+import time
 from pathlib import Path
 
 import optuna
 import pytorch_lightning as pl
 import torch
+from sqlalchemy.exc import OperationalError
 
 import config
 from callbacks import RelativeImprovementEarlyStopping
@@ -148,6 +150,29 @@ def save_best_params(best_params, results_dir, best_value):
     return json_path, txt_path
 
 
+def create_study_with_retry(args, storage, retries=5, delay_seconds=2.0):
+    """Create or load an Optuna study, tolerating concurrent SQLite initialization."""
+    for attempt in range(retries + 1):
+        try:
+            return optuna.create_study(
+                study_name=args.study_name,
+                storage=storage,
+                direction="minimize",
+                load_if_exists=True,
+                pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+            )
+        except OperationalError as exc:
+            if "already exists" not in str(exc).lower() or attempt == retries:
+                raise
+            sleep_time = delay_seconds * (attempt + 1)
+            print(
+                "Optuna storage initialization raced with another process; "
+                f"retrying in {sleep_time:.1f}s.",
+                flush=True,
+            )
+            time.sleep(sleep_time)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Optimize MLP hyperparameters for a split dataset directory."
@@ -179,13 +204,7 @@ def main():
     args.results_dir.mkdir(parents=True, exist_ok=True)
 
     storage = args.storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
-    study = optuna.create_study(
-        study_name=args.study_name,
-        storage=storage,
-        direction="minimize",
-        load_if_exists=True,
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
-    )
+    study = create_study_with_retry(args, storage)
     study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=args.num_trials)
 
     best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))

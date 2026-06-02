@@ -1,10 +1,11 @@
 #!/bin/bash
-# SBATCH -A AST24021
+#SBATCH -A AST24021
 #SBATCH --job-name=gc_train
 #SBATCH --output=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/output/run_output_%j.txt
 #SBATCH --error=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/error/run_error_%j.txt
 #SBATCH --partition=gh
 #SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=1
@@ -15,6 +16,11 @@
 set -Eeuo pipefail
 
 trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
+
+if [ "${SLURM_PROCID:-0}" != "0" ]; then
+    echo "Skipping nonzero Slurm rank ${SLURM_PROCID}; run this script with sbatch, not srun -n >1."
+    exit 0
+fi
 
 VISTA_ROOT="${VISTA_ROOT:-/work/10252/nbr525/vista}"
 SCRIPT_DIR="${SCRIPT_DIR:-${VISTA_ROOT}/lightning_surrogates/models/mlp}"
