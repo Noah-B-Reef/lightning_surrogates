@@ -5,15 +5,20 @@
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=1
 #SBATCH --time=24:00:00
-#SBATCH --mail-type=END
+#SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
 
 VISTA_ROOT="${VISTA_ROOT:-/work/10252/nbr525/vista}"
 SCRIPT_DIR="${SCRIPT_DIR:-${VISTA_ROOT}/lightning_surrogates/models/mlp}"
 DATASETS_DIR="${DATASETS_DIR:-${VISTA_ROOT}/datasets}"
+CONDA_ENV="${CONDA_ENV:-mlp_torch}"
 
 cd "${SCRIPT_DIR}"
 
@@ -29,11 +34,12 @@ TUNE_EPOCHS="${TUNE_EPOCHS:-50}"
 TRAIN_EPOCHS="${TRAIN_EPOCHS:-100}"
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
-NUM_WORKERS="${NUM_WORKERS:-7}"
+NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-0}}"
 
 export MLP_DATASETS_DIR="${DATASETS_DIR}"
 export MLP_DATA_DIR="${DATA_DIR}"
 export MLP_RESULTS_DIR="${RESULTS_DIR}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 mkdir -p "${SCRIPT_DIR}/output" "${SCRIPT_DIR}/error" "${RESULTS_DIR}" "${OPTUNA_RESULTS_DIR}"
 
@@ -49,10 +55,52 @@ echo "SCRIPT_DIR=${SCRIPT_DIR}"
 echo "DATA_DIR=${DATA_DIR}"
 echo "RESULTS_DIR=${RESULTS_DIR}"
 echo "OPTUNA_RESULTS_DIR=${OPTUNA_RESULTS_DIR}"
+echo "CONDA_ENV=${CONDA_ENV}"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-unset}"
+echo "SLURM_NODELIST=${SLURM_NODELIST:-unset}"
+echo "SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK:-unset}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 
-# Load necessary modules if needed.
-# module load module_name
-conda activate mlp_torch
+if command -v module >/dev/null 2>&1; then
+    module list || true
+fi
+
+if command -v conda >/dev/null 2>&1; then
+    eval "$(conda shell.bash hook)"
+elif [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
+    # Batch shells often do not source the interactive Conda hook.
+    source "${HOME}/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "${HOME}/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "${HOME}/anaconda3/etc/profile.d/conda.sh"
+else
+    echo "Could not find conda. Load the module that provides conda or set up ${CONDA_ENV} before submitting."
+    exit 3
+fi
+
+conda activate "${CONDA_ENV}"
+
+echo "Python=$(command -v python)"
+python - <<'PY'
+import importlib.util
+import sys
+
+print(f"Python version: {sys.version}")
+for name in ("torch", "pytorch_lightning", "optuna", "pandas", "numpy"):
+    if importlib.util.find_spec(name) is None:
+        raise RuntimeError(f"Missing required Python package: {name}")
+
+import torch
+
+print(f"Torch version: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"CUDA device count: {torch.cuda.device_count()}")
+if torch.cuda.is_available():
+    print(f"CUDA device 0: {torch.cuda.get_device_name(0)}")
+PY
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi
+fi
 
 python "${SCRIPT_DIR}/src/optimize.py" \
     "${DATA_DIR}" \

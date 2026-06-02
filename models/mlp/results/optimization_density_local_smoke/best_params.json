@@ -1,0 +1,10 @@
+{
+  "num_hidden_layers": 6,
+  "num_neurons_per_hidden_layer": 128,
+  "learning_rate": 0.0008880848616588826,
+  "batch_size": 64,
+  "dropout": 0.1844999680796079,
+  "weight_decay": 0.006894118805284862,
+  "forecast_horizon": 1,
+  "best_value": 0.3507760465145111
+}
