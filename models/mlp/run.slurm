@@ -1,4 +1,5 @@
 #!/bin/bash
+# SBATCH -A AST24021
 #SBATCH --job-name=gc_train
 #SBATCH --output=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/output/run_output_%j.txt
 #SBATCH --error=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/error/run_error_%j.txt
