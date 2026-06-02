@@ -1,26 +1,14 @@
 #!/bin/bash
 #SBATCH -A AST24021
 #SBATCH --job-name=gc_train
-#SBATCH --output=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/output/run_output_%j.txt
-#SBATCH --error=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/error/run_error_%j.txt
+#SBATCH --output=./output/run_output_%j.txt
+#SBATCH --error=./error/run_error_%j.txt
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gpus-per-node=1
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
-
-set -Eeuo pipefail
-
-trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
-
-if [ "${SLURM_PROCID:-0}" != "0" ]; then
-    echo "Skipping nonzero Slurm rank ${SLURM_PROCID}; run this script with sbatch, not srun -n >1."
-    exit 0
-fi
 
 VISTA_ROOT="${VISTA_ROOT:-/work/10252/nbr525/vista}"
 SCRIPT_DIR="${SCRIPT_DIR:-${VISTA_ROOT}/lightning_surrogates/models/mlp}"
@@ -50,14 +38,6 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 mkdir -p "${SCRIPT_DIR}/output" "${SCRIPT_DIR}/error" "${RESULTS_DIR}" "${OPTUNA_RESULTS_DIR}"
 
-for split_file in train.csv val.csv test.csv; do
-    if [ ! -f "${DATA_DIR}/${split_file}" ]; then
-        echo "Missing ${DATA_DIR}/${split_file}"
-        echo "DATA_DIR must point to a split directory containing train.csv, val.csv, and test.csv."
-        exit 2
-    fi
-done
-
 echo "SCRIPT_DIR=${SCRIPT_DIR}"
 echo "DATA_DIR=${DATA_DIR}"
 echo "RESULTS_DIR=${RESULTS_DIR}"
@@ -85,29 +65,6 @@ else
 fi
 
 conda activate "${CONDA_ENV}"
-
-echo "Python=$(command -v python)"
-python - <<'PY'
-import importlib.util
-import sys
-
-print(f"Python version: {sys.version}")
-for name in ("torch", "pytorch_lightning", "optuna", "pandas", "numpy"):
-    if importlib.util.find_spec(name) is None:
-        raise RuntimeError(f"Missing required Python package: {name}")
-
-import torch
-
-print(f"Torch version: {torch.__version__}")
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"CUDA device count: {torch.cuda.device_count()}")
-if torch.cuda.is_available():
-    print(f"CUDA device 0: {torch.cuda.get_device_name(0)}")
-PY
-
-if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi
-fi
 
 python "${SCRIPT_DIR}/src/optimize.py" \
     "${DATA_DIR}" \
