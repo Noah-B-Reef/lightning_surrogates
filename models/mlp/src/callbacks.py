@@ -2,6 +2,36 @@ import torch
 import pytorch_lightning as pl
 
 
+class EpochProgressPrinter(pl.Callback):
+    """Print compact epoch metrics that remain readable in Slurm logs."""
+
+    def __init__(self, prefix, metric_names=("train_loss", "val_loss")):
+        super().__init__()
+        self.prefix = prefix
+        self.metric_names = metric_names
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking or not trainer.is_global_zero:
+            return
+        metrics = []
+        for name in self.metric_names:
+            value = trainer.callback_metrics.get(name)
+            if value is None:
+                continue
+            if isinstance(value, torch.Tensor):
+                value = value.detach()
+                if not torch.isfinite(value):
+                    continue
+                value = value.item()
+            metrics.append(f"{name}={value:.6g}")
+        if metrics:
+            print(
+                f"{self.prefix} epoch={trainer.current_epoch + 1}/{trainer.max_epochs} "
+                + " ".join(metrics),
+                flush=True,
+            )
+
+
 class RelativeImprovementEarlyStopping(pl.Callback):
     """Stop when a monitored metric fails to improve by a relative threshold."""
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A AST24021
 #SBATCH --job-name=gc_train
-#SBATCH --output=./output/run_output_%j.txt
-#SBATCH --error=./error/run_error_%j.txt
+#SBATCH --output=run_output_%j.txt
+#SBATCH --error=run_error_%j.txt
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -37,6 +37,10 @@ export MLP_RESULTS_DIR="${RESULTS_DIR}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 mkdir -p "${SCRIPT_DIR}/output" "${SCRIPT_DIR}/error" "${RESULTS_DIR}" "${OPTUNA_RESULTS_DIR}"
+
+JOB_ID="${SLURM_JOB_ID:-manual}"
+exec > >(tee -a "${SCRIPT_DIR}/output/run_output_${JOB_ID}.txt")
+exec 2> >(tee -a "${SCRIPT_DIR}/error/run_error_${JOB_ID}.txt" >&2)
 
 echo "SCRIPT_DIR=${SCRIPT_DIR}"
 echo "DATA_DIR=${DATA_DIR}"

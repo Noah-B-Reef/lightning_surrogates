@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
 import config
-from callbacks import RelativeImprovementEarlyStopping
+from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
 from model import MLP
 
@@ -164,10 +164,30 @@ def train_final_model(
         "weight_decay": float(best_config.get("weight_decay", config.WEIGHT_DECAY)),
     }
     model = MLP(model_config)
+    train_batches = len(data.train_dataloader())
+    val_batches = len(data.val_dataloader())
+    num_parameters = sum(param.numel() for param in model.parameters())
+
+    print(
+        "Starting final training: "
+        f"epochs={num_epochs}, "
+        f"batch_size={best_config['batch_size']}, "
+        f"learning_rate={best_config['learning_rate']:.6g}, "
+        f"train_samples={len(data.train_ds):,}, "
+        f"val_samples={len(data.val_ds):,}, "
+        f"train_batches={train_batches:,}, "
+        f"val_batches={val_batches:,}, "
+        f"parameters={num_parameters:,}",
+        flush=True,
+    )
 
     metrics = MetricsHistoryLogger()
     callbacks = [
         RelativeImprovementEarlyStopping(monitor="val_loss", patience=8, mode="min"),
+        EpochProgressPrinter(
+            prefix="[Final training]",
+            metric_names=("train_loss", "val_loss", "train_mse", "val_mse"),
+        ),
         ModelCheckpoint(
             monitor="val_loss",
             dirpath=str(results_dir / "checkpoints"),
@@ -203,7 +223,7 @@ def train_final_model(
     trainer.fit(model, datamodule=data)
 
     final_checkpoint = results_dir / checkpoint_name
-    best_checkpoint = callbacks[1].best_model_path
+    best_checkpoint = callbacks[2].best_model_path
     if best_checkpoint:
         shutil.copy2(best_checkpoint, final_checkpoint)
     else:
@@ -211,6 +231,11 @@ def train_final_model(
 
     (results_dir / "trained_model_config.json").write_text(json.dumps(model_config, indent=2))
     plot_history(metrics.history, results_dir / "loss_curves.png")
+    print(
+        f"Final training complete: checkpoint={final_checkpoint}, "
+        f"best_checkpoint={best_checkpoint or 'none'}",
+        flush=True,
+    )
     return {
         "checkpoint": str(final_checkpoint),
         "best_checkpoint": best_checkpoint,

@@ -9,7 +9,7 @@ import torch
 from sqlalchemy.exc import OperationalError
 
 import config
-from callbacks import RelativeImprovementEarlyStopping
+from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
 from model import MLP
 
@@ -103,6 +103,10 @@ def objective(trial, args, split_dir):
         devices=parse_devices(args.devices),
         precision=args.precision,
         callbacks=[
+            EpochProgressPrinter(
+                prefix=f"[Optuna trial {trial.number}]",
+                metric_names=("train_loss", "val_loss"),
+            ),
             RelativeImprovementEarlyStopping(
                 monitor="val_loss",
                 min_relative_improvement=args.min_relative_improvement,
@@ -127,6 +131,7 @@ def objective(trial, args, split_dir):
 
     trial.set_user_attr("params_for_training", params)
     value = float(val_loss.detach().cpu())
+    print(f"[Optuna trial {trial.number}] complete val_loss={value:.6g}", flush=True)
     del trainer, model, data
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -205,6 +210,11 @@ def main():
 
     storage = args.storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
     study = create_study_with_retry(args, storage)
+    print(
+        f"Starting Optuna study '{args.study_name}' with {args.num_trials} trials "
+        f"and up to {args.tune_epochs} epochs per trial.",
+        flush=True,
+    )
     study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=args.num_trials)
 
     best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
