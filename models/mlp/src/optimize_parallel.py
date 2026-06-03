@@ -11,6 +11,7 @@ from optimize import (
     TRAINING_PARAM_KEYS,
     create_study_with_retry,
     objective,
+    prepare_storage_for_resume,
     save_best_params,
     sqlite_path_from_storage,
 )
@@ -138,11 +139,14 @@ def main():
     if args.journal_mode == "fresh":
         if rank == 0:
             reset_storage(args, args.storage)
+            prepare_storage_for_resume(args.storage)
             study = create_study_with_retry(args, args.storage)
         else:
             time.sleep(5.0)
             study = create_study_with_retry(args, args.storage)
     else:
+        if rank == 0:
+            prepare_storage_for_resume(args.storage)
         study = create_study_with_retry(args, args.storage)
 
     initial_finished = 0 if args.journal_mode == "fresh" else finished_trial_count(study)

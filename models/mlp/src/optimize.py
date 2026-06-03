@@ -167,6 +167,23 @@ def reset_sqlite_storage(storage):
             print(f"Removed {path}", flush=True)
 
 
+def prepare_storage_for_resume(storage):
+    sqlite_path = sqlite_path_from_storage(storage)
+    if sqlite_path is None:
+        print(
+            "Using server-backed Optuna storage; Optuna will create the study if it is missing.",
+            flush=True,
+        )
+        return
+
+    if sqlite_path.exists():
+        print(f"Found Optuna journal at {sqlite_path}; resuming existing study.", flush=True)
+        return
+
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"No Optuna journal found at {sqlite_path}; creating a new one.", flush=True)
+
+
 def finished_trial_count(study):
     finished_states = {TrialState.COMPLETE, TrialState.PRUNED, TrialState.FAIL}
     return sum(
@@ -246,6 +263,7 @@ def main():
     storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
     if args.journal_mode == "fresh":
         reset_sqlite_storage(storage)
+    prepare_storage_for_resume(storage)
     study = create_study_with_retry(args, storage)
     existing_finished_trials = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     trials_to_run = max(0, args.num_trials - existing_finished_trials)
