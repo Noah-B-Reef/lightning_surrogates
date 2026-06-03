@@ -4,10 +4,8 @@
 #SBATCH --output=optimize_parallel_%j.out
 #SBATCH --error=optimize_parallel_%j.err
 #SBATCH --partition=gh
-#SBATCH --nodes=2
+#SBATCH --nodes=5
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
