@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A AST24021
 #SBATCH --job-name=gc_pipeline
-#SBATCH --output=run_%j.out
-#SBATCH --error=run_%j.err
+#SBATCH --output=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/results/output/run_%j.out
+#SBATCH --error=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/results/error/run_%j.err
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -10,7 +10,15 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+    if [ -f "${SLURM_SUBMIT_DIR}/slurm/common.sh" ]; then
+        source "${SLURM_SUBMIT_DIR}/slurm/common.sh"
+    else
+        source "${SLURM_SUBMIT_DIR}/common.sh"
+    fi
+else
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+fi
 trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
 
 cd "${SCRIPT_DIR}"
