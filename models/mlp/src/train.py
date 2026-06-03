@@ -55,9 +55,6 @@ def load_best_config(config_file):
             "num_neurons_per_hidden_layer": int(payload["num_neurons_per_hidden_layer"]),
             "learning_rate": float(payload["learning_rate"]),
             "batch_size": int(payload["batch_size"]),
-            "forecast_horizon": int(payload.get("forecast_horizon", config.FORECAST_HORIZON)),
-            "dropout": float(payload.get("dropout", config.DROPOUT)),
-            "weight_decay": float(payload.get("weight_decay", config.WEIGHT_DECAY)),
         }
 
     key_mapping = {
@@ -67,9 +64,6 @@ def load_best_config(config_file):
         "num_neurons_per_hidden_layer": "num_neurons_per_hidden_layer",
         "learning_rate": "learning_rate",
         "batch_size": "batch_size",
-        "forecast_horizon": "forecast_horizon",
-        "dropout": "dropout",
-        "weight_decay": "weight_decay",
     }
     params = {}
     for line in path.read_text().splitlines():
@@ -81,16 +75,12 @@ def load_best_config(config_file):
             "num_hidden_layers",
             "num_neurons_per_hidden_layer",
             "batch_size",
-            "forecast_horizon",
         }:
             params[key] = int(float(value))
-        elif key in {"learning_rate", "dropout", "weight_decay"}:
+        elif key in {"learning_rate"}:
             params[key] = float(value)
     if not params:
         raise ValueError(f"No hyperparameters found in {path}")
-    params.setdefault("forecast_horizon", config.FORECAST_HORIZON)
-    params.setdefault("dropout", config.DROPOUT)
-    params.setdefault("weight_decay", config.WEIGHT_DECAY)
     return params
 
 
@@ -100,9 +90,6 @@ def default_config():
         "num_neurons_per_hidden_layer": config.HIDDEN_UNITS,
         "learning_rate": config.LEARNING_RATE,
         "batch_size": config.BATCH_SIZE,
-        "forecast_horizon": config.FORECAST_HORIZON,
-        "dropout": config.DROPOUT,
-        "weight_decay": config.WEIGHT_DECAY,
     }
 
 
@@ -150,18 +137,14 @@ def train_final_model(
         data_dir=str(split_dir),
         batch_size=int(best_config["batch_size"]),
         num_workers=int(num_workers),
-        forecast_horizon=int(best_config.get("forecast_horizon", config.FORECAST_HORIZON)),
     )
     data.setup("fit")
     model_config = {
         "num_inputs": data.num_features,
         "output_size": data.num_targets,
-        "forecast_horizon": int(best_config.get("forecast_horizon", config.FORECAST_HORIZON)),
         "num_hidden_layers": int(best_config["num_hidden_layers"]),
         "num_neurons_per_hidden_layer": int(best_config["num_neurons_per_hidden_layer"]),
         "learning_rate": float(best_config["learning_rate"]),
-        "dropout": float(best_config.get("dropout", config.DROPOUT)),
-        "weight_decay": float(best_config.get("weight_decay", config.WEIGHT_DECAY)),
     }
     model = MLP(model_config)
     train_batches = len(data.train_dataloader())

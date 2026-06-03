@@ -14,6 +14,14 @@ from data import GravCollapseDataModule
 from model import MLP
 
 
+TRAINING_PARAM_KEYS = (
+    "num_hidden_layers",
+    "num_neurons_per_hidden_layer",
+    "learning_rate",
+    "batch_size",
+)
+
+
 def parse_devices(devices):
     if isinstance(devices, int):
         return devices
@@ -43,23 +51,12 @@ def objective(trial, args, split_dir):
         "batch_size": trial.suggest_categorical(
             "batch_size", search["batch_size"]["choices"]
         ),
-        "dropout": trial.suggest_float(
-            "dropout", search["dropout"]["low"], search["dropout"]["high"]
-        ),
-        "weight_decay": trial.suggest_float(
-            "weight_decay",
-            search["weight_decay"]["low"],
-            search["weight_decay"]["high"],
-            log=search["weight_decay"]["log"],
-        ),
-        "forecast_horizon": args.forecast_horizon,
     }
 
     data = GravCollapseDataModule(
         data_dir=str(split_dir),
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
-        forecast_horizon=params["forecast_horizon"],
     )
     data.setup("fit")
     model_config = {
@@ -68,9 +65,6 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
-        "forecast_horizon": params["forecast_horizon"],
-        "dropout": params["dropout"],
-        "weight_decay": params["weight_decay"],
     }
     model = MLP(model_config)
     train_batches = len(data.train_dataloader())
@@ -84,9 +78,6 @@ def objective(trial, args, split_dir):
         f"hidden_layers={model_config['num_hidden_layers']}, "
         f"hidden_units={model_config['num_neurons_per_hidden_layer']}, "
         f"output={model_config['output_size']}, "
-        f"forecast_horizon={model_config['forecast_horizon']}, "
-        f"dropout={model_config['dropout']:.3g}, "
-        f"weight_decay={model_config['weight_decay']:.3g}, "
         f"parameters={num_parameters:,}; "
         f"training: batch_size={params['batch_size']}, "
         f"learning_rate={params['learning_rate']:.6g}, "
@@ -139,7 +130,7 @@ def objective(trial, args, split_dir):
 
 
 def save_best_params(best_params, results_dir, best_value):
-    payload = dict(best_params)
+    payload = {key: best_params[key] for key in TRAINING_PARAM_KEYS}
     payload["best_value"] = float(best_value)
     json_path = results_dir / "best_params.json"
     txt_path = results_dir / "best_params.txt"
@@ -149,9 +140,6 @@ def save_best_params(best_params, results_dir, best_value):
         f.write(f"hidden_units={best_params['num_neurons_per_hidden_layer']}\n")
         f.write(f"learning_rate={best_params['learning_rate']}\n")
         f.write(f"batch_size={best_params['batch_size']}\n")
-        f.write(f"forecast_horizon={best_params.get('forecast_horizon', config.FORECAST_HORIZON)}\n")
-        f.write(f"dropout={best_params.get('dropout', config.DROPOUT)}\n")
-        f.write(f"weight_decay={best_params.get('weight_decay', config.WEIGHT_DECAY)}\n")
     return json_path, txt_path
 
 
@@ -194,7 +182,6 @@ def main():
     parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_TUNE_EPOCHS)
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_STUDY_NAME)
     parser.add_argument("--storage", type=str, default=None)
-    parser.add_argument("--forecast-horizon", type=int, default=config.FORECAST_HORIZON)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
@@ -217,8 +204,8 @@ def main():
     )
     study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=args.num_trials)
 
-    best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
-    best_params.setdefault("forecast_horizon", args.forecast_horizon)
+    raw_best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
+    best_params = {key: raw_best_params[key] for key in TRAINING_PARAM_KEYS}
     json_path, txt_path = save_best_params(best_params, args.results_dir, study.best_value)
 
     summary = {

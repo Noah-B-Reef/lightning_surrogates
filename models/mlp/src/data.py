@@ -14,16 +14,16 @@ PHYS_COLS = ("Density", "gasTemp", "dustTemp", "Av", "radfield", "zeta")
 
 class GravCollapseDataset(Dataset):
     """
-    Build one-step or multi-step transition samples from a sampled split CSV.
+    Build one-step transition samples from a sampled split CSV.
 
     Input layout:
         [physical parameters at t, log10 abundances at t]
 
     Target layout:
-        log10 abundances at t + 1 ... t + forecast_horizon
+        log10 abundances at t + 1
     """
 
-    def __init__(self, csv_path, forecast_horizon=1):
+    def __init__(self, csv_path):
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"Split CSV not found: {csv_path}")
 
@@ -45,8 +45,6 @@ class GravCollapseDataset(Dataset):
         self._abundance_cols = abundance_cols
         self._feature_names = phys_cols + abundance_cols
         self._target_names = abundance_cols
-        self._num_phys = len(phys_cols)
-        self._forecast_horizon = max(1, int(forecast_horizon))
         self._tracer_by_row = df["Tracer"].to_numpy()
         self._time_by_row = df["Time"].to_numpy()
         self._phys = df[phys_cols].to_numpy(dtype=np.float32, copy=True)
@@ -57,12 +55,10 @@ class GravCollapseDataset(Dataset):
         sample_tracers = []
         for tracer_id, row_indices in df.groupby("Tracer", sort=False).indices.items():
             num_steps = len(row_indices)
-            if num_steps <= self._forecast_horizon:
+            if num_steps <= 1:
                 continue
             first_row = int(row_indices[0])
-            valid_starts = first_row + np.arange(
-                num_steps - self._forecast_horizon, dtype=np.int64
-            )
+            valid_starts = first_row + np.arange(num_steps - 1, dtype=np.int64)
             starts.append(valid_starts)
             sample_tracers.append(np.full(len(valid_starts), tracer_id))
 
@@ -85,16 +81,8 @@ class GravCollapseDataset(Dataset):
         initial = np.concatenate([self._phys[start], self._abund[start]]).astype(
             np.float32, copy=False
         )
-        if self._forecast_horizon > 1:
-            future_phys = self._phys[start + 1 : start + self._forecast_horizon]
-        else:
-            future_phys = np.empty((0, self._num_phys), dtype=np.float32)
-        target_seq = self._abund[start + 1 : start + self._forecast_horizon + 1]
-        return (
-            torch.from_numpy(initial),
-            torch.from_numpy(future_phys),
-            torch.from_numpy(target_seq),
-        )
+        target = self._abund[start + 1]
+        return torch.from_numpy(initial), torch.from_numpy(target)
 
     def feature_names(self):
         return self._feature_names
@@ -111,10 +99,6 @@ class GravCollapseDataset(Dataset):
     def num_targets(self):
         return len(self._target_names)
 
-    @property
-    def forecast_horizon(self):
-        return self._forecast_horizon
-
     def tracer_ids(self):
         return self._sample_tracers.copy()
 
@@ -126,27 +110,19 @@ class GravCollapseDataModule(pl.LightningDataModule):
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=False,
-        forecast_horizon=config.FORECAST_HORIZON,
     ):
         super().__init__()
         self.data_dir = str(data_dir)
         self.batch_size = int(batch_size)
         self.num_workers = int(num_workers)
         self.pin_memory = bool(pin_memory)
-        self.forecast_horizon = max(1, int(forecast_horizon))
 
     def setup(self, stage=None):
         if stage in (None, "fit"):
-            self.train_ds = GravCollapseDataset(
-                os.path.join(self.data_dir, "train.csv"), self.forecast_horizon
-            )
-            self.val_ds = GravCollapseDataset(
-                os.path.join(self.data_dir, "val.csv"), self.forecast_horizon
-            )
+            self.train_ds = GravCollapseDataset(os.path.join(self.data_dir, "train.csv"))
+            self.val_ds = GravCollapseDataset(os.path.join(self.data_dir, "val.csv"))
         if stage in (None, "test", "predict"):
-            self.test_ds = GravCollapseDataset(
-                os.path.join(self.data_dir, "test.csv"), self.forecast_horizon
-            )
+            self.test_ds = GravCollapseDataset(os.path.join(self.data_dir, "test.csv"))
         schema_ds = getattr(self, "train_ds", None) or getattr(self, "test_ds", None)
         self._num_features = schema_ds.num_features
         self._num_targets = schema_ds.num_targets

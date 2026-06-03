@@ -24,13 +24,10 @@ DEFAULT_DATASETS_DIR = env_path("MLP_DATASETS_DIR", RESEARCH_DIR / "datasets")
 
 
 # Model/training defaults
-FORECAST_HORIZON = 1
 NUM_LAYERS = 3
 HIDDEN_UNITS = 256
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-3
-DROPOUT = 0.0
-WEIGHT_DECAY = 1e-4
 EPOCHS = 100
 
 # Data/result defaults. Override these on HPC rather than editing code.
@@ -89,6 +86,4 @@ OPTUNA_SEARCH_SPACE = {
     "hidden_units": {"type": "int", "low": 128, "high": 1024, "step": 128},
     "learning_rate": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True},
     "batch_size": {"type": "categorical", "choices": [16, 32, 64, 128]},
-    "dropout": {"type": "float", "low": 0.0, "high": 0.3},
-    "weight_decay": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True},
 }

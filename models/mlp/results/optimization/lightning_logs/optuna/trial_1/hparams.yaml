@@ -1,9 +1,0 @@
-config:
-  dropout: 0.1501516601693042
-  forecast_horizon: 1
-  learning_rate: 4.7696425384074664e-05
-  num_hidden_layers: 3
-  num_inputs: 339
-  num_neurons_per_hidden_layer: 640
-  output_size: 333
-  weight_decay: 0.00014973267772223748
