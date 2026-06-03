@@ -93,7 +93,7 @@ def main():
     parser.add_argument("--trials-per-worker", type=int, default=None)
     parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_PARALLEL_TUNE_EPOCHS)
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_PARALLEL_STUDY_NAME)
-    parser.add_argument("--storage", type=str, default=config.OPTUNA_PARALLEL_STORAGE)
+    parser.add_argument("--storage", type=str, default=None)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
@@ -119,35 +119,34 @@ def main():
     )
     args = parser.parse_args()
 
+    configured_storage = config.OPTUNA_PARALLEL_STORAGE or None
+    args.results_dir = Path(args.results_dir).expanduser().resolve()
+    args.results_dir.mkdir(parents=True, exist_ok=True)
+    storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
+
     rank, world_size, node_id = parse_rank_context()
-    if not args.storage:
-        raise ValueError(
-            "Parallel Optuna requires a server-backed storage URL. Set "
-            "PARALLEL_OPTUNA_STORAGE in config.sh or pass --storage."
-        )
-    if world_size > 1 and is_sqlite_storage(args.storage) and not args.allow_sqlite:
+    if world_size > 1 and is_sqlite_storage(storage) and not args.allow_sqlite:
         raise ValueError(
             "Parallel Optuna across Slurm ranks requires server-backed storage "
-            "such as PostgreSQL or MySQL. SQLite is not safe for multi-node workers."
+            "such as PostgreSQL or MySQL. SQLite is not safe for multi-node workers. "
+            "Pass --allow-sqlite only if you intentionally accept that risk."
         )
 
     dataset_path = args.data_dir or args.dataset_path
     split_dir = config.resolve_split_dir(dataset_path)
-    args.results_dir = Path(args.results_dir).expanduser().resolve()
-    args.results_dir.mkdir(parents=True, exist_ok=True)
 
     if args.journal_mode == "fresh":
         if rank == 0:
-            reset_storage(args, args.storage)
-            prepare_storage_for_resume(args.storage)
-            study = create_study_with_retry(args, args.storage)
+            reset_storage(args, storage)
+            prepare_storage_for_resume(storage)
+            study = create_study_with_retry(args, storage)
         else:
             time.sleep(5.0)
-            study = create_study_with_retry(args, args.storage)
+            study = create_study_with_retry(args, storage)
     else:
         if rank == 0:
-            prepare_storage_for_resume(args.storage)
-        study = create_study_with_retry(args, args.storage)
+            prepare_storage_for_resume(storage)
+        study = create_study_with_retry(args, storage)
 
     initial_finished = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     if args.trials_per_worker is None:
@@ -161,7 +160,7 @@ def main():
         f"[rank {rank}/{world_size} node {node_id}] study={args.study_name} "
         f"worker_trials={worker_trials} target_new_trials={target_new_trials} "
         f"initial_finished_trials={initial_finished} "
-        f"storage={args.storage}",
+        f"storage={storage}",
         flush=True,
     )
 
@@ -184,7 +183,7 @@ def main():
     summary = {
         "split_dir": str(split_dir),
         "study_name": args.study_name,
-        "storage": args.storage,
+        "storage": storage,
         "world_size": world_size,
         "target_new_trials": target_new_trials,
         "finished_trials": finished,

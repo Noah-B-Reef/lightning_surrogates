@@ -31,9 +31,12 @@ echo "PARALLEL_TUNE_EPOCHS=${PARALLEL_TUNE_EPOCHS}"
 activate_conda
 
 if [ -z "${PARALLEL_OPTUNA_STORAGE}" ]; then
-    echo "Set optimize_parallel.storage in ${MLP_SLURM_CONFIG} to a server-backed Optuna RDB URL."
-    echo "SQLite is intentionally not used for multi-node optimization."
-    exit 4
+    PARALLEL_OPTUNA_STORAGE="sqlite:///${OPTUNA_PARALLEL_RESULTS_DIR}/optuna.sqlite3"
+    echo "PARALLEL_OPTUNA_STORAGE is unset; using ${PARALLEL_OPTUNA_STORAGE}"
+    echo "WARNING: SQLite is not recommended for multi-node Optuna workers."
+    SQLITE_STORAGE_ARG=(--allow-sqlite)
+else
+    SQLITE_STORAGE_ARG=()
 fi
 
 srun python "${SCRIPT_DIR}/src/optimize_parallel.py" \
@@ -49,4 +52,5 @@ srun python "${SCRIPT_DIR}/src/optimize_parallel.py" \
     --precision "${PRECISION}" \
     --patience "${PRUNER_PATIENCE}" \
     --min-relative-improvement "${MIN_RELATIVE_IMPROVEMENT}" \
-    --num-workers "${NUM_WORKERS}"
+    --num-workers "${NUM_WORKERS}" \
+    "${SQLITE_STORAGE_ARG[@]}"
