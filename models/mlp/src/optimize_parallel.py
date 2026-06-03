@@ -6,8 +6,14 @@ from pathlib import Path
 
 import optuna
 
-import config
-from optimize import TRAINING_PARAM_KEYS, objective, save_best_params
+import settings as config
+from optimize import (
+    TRAINING_PARAM_KEYS,
+    create_study_with_retry,
+    objective,
+    save_best_params,
+    sqlite_path_from_storage,
+)
 
 
 def parse_rank_context():
@@ -27,14 +33,24 @@ def assigned_trials(total_trials, world_size, rank):
     return base + (1 if rank < remainder else 0)
 
 
-def create_or_load_study(args):
-    return optuna.create_study(
-        study_name=args.study_name,
-        storage=args.storage,
-        direction="minimize",
-        load_if_exists=True,
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
-    )
+def reset_storage(args, storage):
+    sqlite_path = sqlite_path_from_storage(storage)
+    if sqlite_path is not None:
+        for path in (
+            sqlite_path,
+            Path(f"{sqlite_path}-journal"),
+            Path(f"{sqlite_path}-wal"),
+            Path(f"{sqlite_path}-shm"),
+        ):
+            if path.exists():
+                path.unlink()
+                print(f"Removed {path}", flush=True)
+    else:
+        try:
+            optuna.delete_study(study_name=args.study_name, storage=storage)
+            print(f"Deleted study '{args.study_name}' from storage.", flush=True)
+        except KeyError:
+            pass  # Study does not exist
 
 
 def finished_trial_count(study):
@@ -71,24 +87,43 @@ def main():
         help="Split directory with train/val/test.csv (default: best-sampler split).",
     )
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
-    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR / "optimization")
-    parser.add_argument("--num-trials", type=int, default=config.OPTUNA_N_TRIALS)
+    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_OPTUNA_PARALLEL_RESULTS_DIR)
+    parser.add_argument("--num-trials", type=int, default=config.OPTUNA_PARALLEL_N_TRIALS)
     parser.add_argument("--trials-per-worker", type=int, default=None)
-    parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_TUNE_EPOCHS)
-    parser.add_argument("--study-name", type=str, default=f"{config.OPTUNA_STUDY_NAME}_parallel")
-    parser.add_argument("--storage", type=str, required=True)
+    parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_PARALLEL_TUNE_EPOCHS)
+    parser.add_argument("--study-name", type=str, default=config.OPTUNA_PARALLEL_STUDY_NAME)
+    parser.add_argument("--storage", type=str, default=config.OPTUNA_PARALLEL_STORAGE)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
     parser.add_argument("--patience", type=int, default=config.OPTUNA_PRUNER_PATIENCE)
-    parser.add_argument("--min-relative-improvement", type=float, default=0.02)
+    parser.add_argument(
+        "--min-relative-improvement",
+        type=float,
+        default=config.OPTUNA_MIN_RELATIVE_IMPROVEMENT,
+    )
     parser.add_argument("--finalize-timeout", type=int, default=3600)
     parser.add_argument("--finalize-poll-seconds", type=int, default=30)
     parser.add_argument("--allow-sqlite", action="store_true")
+    parser.add_argument(
+        "--journal-mode",
+        choices=("resume", "fresh"),
+        default=config.OPTUNA_JOURNAL_MODE,
+        help=(
+            "resume: reuse the existing Optuna journal and run only enough trials "
+            "to reach --num-trials finished trials. fresh: remove/reset the "
+            "Optuna storage and start a new study."
+        ),
+    )
     args = parser.parse_args()
 
     rank, world_size, node_id = parse_rank_context()
+    if not args.storage:
+        raise ValueError(
+            "Parallel Optuna requires a server-backed storage URL. Set "
+            "PARALLEL_OPTUNA_STORAGE in config.sh or pass --storage."
+        )
     if world_size > 1 and is_sqlite_storage(args.storage) and not args.allow_sqlite:
         raise ValueError(
             "Parallel Optuna across Slurm ranks requires server-backed storage "
@@ -100,8 +135,17 @@ def main():
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
 
-    study = create_or_load_study(args)
-    initial_finished = finished_trial_count(study)
+    if args.journal_mode == "fresh":
+        if rank == 0:
+            reset_storage(args, args.storage)
+            study = create_study_with_retry(args, args.storage)
+        else:
+            time.sleep(5.0)
+            study = create_study_with_retry(args, args.storage)
+    else:
+        study = create_study_with_retry(args, args.storage)
+
+    initial_finished = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     if args.trials_per_worker is None:
         worker_trials = assigned_trials(args.num_trials, world_size, rank)
         target_new_trials = args.num_trials

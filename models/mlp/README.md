@@ -20,6 +20,16 @@ When no split path is given, every script defaults to the best-sampler split exp
 python src/optimize.py /path/to/split   --results-dir /path/to/results/optimization   --num-trials 25   --tune-epochs 50
 ```
 
+By default, optimization resumes from the configured SQLite journal and treats
+`--num-trials` as the target number of finished trials in that journal. For
+example, if the journal already has 10 finished trials and `--num-trials 25`,
+the optimizer runs 15 more. Use `--journal-mode fresh` to remove the SQLite
+journal and start a new study:
+
+```bash
+python src/optimize.py /path/to/split --journal-mode fresh --num-trials 25
+```
+
 Outputs:
 
 ```text
@@ -102,7 +112,7 @@ sbatch slurm/train.slurm
 sbatch slurm/test.slurm
 ```
 
-Edit `slurm/config.yaml`, or pass `MLP_SLURM_CONFIG=/path/to/config.yaml`, to
+Edit `config.sh`, or pass `MLP_SLURM_CONFIG=/path/to/config.sh`, to
 change split paths, result paths, optimization settings, training epochs, and
 test output paths.
 
@@ -127,15 +137,20 @@ This broadens capacity beyond the previous shallow/narrow defaults while avoidin
 - `OPTUNA_RESULTS_DIR`: serial Optuna output directory.
 - `N_TRIALS`, `TUNE_EPOCHS`, `TRAIN_EPOCHS`: Slurm wrapper runtime settings.
 - `ACCELERATOR`, `DEVICES`, `NUM_WORKERS`: compute settings.
-- `MLP_SLURM_CONFIG`: optional path to a replacement Slurm `config.yaml`.
+- `MLP_SLURM_CONFIG`: optional path to a replacement config.sh script.
 
 ## SLURM
 
 Runtime paths and Python parameters for the Slurm wrappers live in:
 
 ```bash
-slurm/config.yaml
+config.sh
 ```
+
+The Python defaults in `src/settings.py` are also loaded from this shell script.
+Set `MLP_CONFIG` or `MLP_SLURM_CONFIG` to point both Python and Slurm wrappers
+at a different config. When changing `OPTUNA_RESULTS_DIR`, update
+`TRAIN_CONFIG_FILE` if final training should consume that optimizer output.
 
 Submit the full serial optimize -> train -> test pipeline:
 
@@ -157,12 +172,12 @@ Submit parallel Optuna optimization:
 sbatch slurm/optimize_parallel.slurm
 ```
 
-Set `optimize_parallel.storage` in `slurm/config.yaml` to a server-backed Optuna
+Set `PARALLEL_OPTUNA_STORAGE` in `config.sh` to a server-backed Optuna
 RDB URL before using the parallel optimizer. SQLite is not safe for multi-node
 Optuna workers.
 
 Use a different config file without editing the repository:
 
 ```bash
-sbatch --export=ALL,MLP_SLURM_CONFIG=/path/to/config.yaml slurm/run.slurm
+sbatch --export=ALL,MLP_SLURM_CONFIG=/path/to/config.sh slurm/run.slurm
 ```

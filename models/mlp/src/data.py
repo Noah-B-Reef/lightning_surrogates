@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import config
+import settings as config
 
 
 PHYS_COLS = ("Density", "gasTemp", "dustTemp", "Av", "radfield", "zeta")

@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-import config
+import settings as config
 from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
 from model import MLP
@@ -117,7 +117,7 @@ def train_final_model(
     results_dir,
     *,
     num_epochs=None,
-    checkpoint_name="mlp_grav_collapse.ckpt",
+    checkpoint_name=config.CHECKPOINT_NAME,
     save_epoch_checkpoints=True,
     accelerator=config.ACCELERATOR,
     devices=config.NUM_DEVICES,
@@ -247,7 +247,7 @@ def main(
         best_config = default_config()
     else:
         if config_file is None:
-            config_file = Path(results_dir) / "optimization" / "best_params.json"
+            config_file = config.TRAIN_CONFIG_FILE
         best_config = load_best_config(config_file)
     return train_final_model(
         best_config,
@@ -268,8 +268,8 @@ if __name__ == "__main__":
     parser.add_argument("dataset_path", nargs="?", default=None)
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--config-file", type=Path, default=None)
-    parser.add_argument("--checkpoint", type=str, default="mlp_grav_collapse.ckpt")
+    parser.add_argument("--config-file", type=Path, default=config.TRAIN_CONFIG_FILE)
+    parser.add_argument("--checkpoint", type=str, default=config.CHECKPOINT_NAME)
     parser.add_argument("--use-defaults", action="store_true")
     parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)

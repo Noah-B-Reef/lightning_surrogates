@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-import config
+import settings as config
 from data import PHYS_COLS
 from model import MLP
 
@@ -101,7 +101,7 @@ def plot_rollout(tracer, time, true_vals, pred_vals, species, path):
 def main(
     model_checkpoint,
     data_dir=None,
-    output_dir="results/test_results",
+    output_dir=config.TEST_OUTPUT_DIR,
     test_dir=None,
     species=None,
     num_tracers=10,
@@ -187,9 +187,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate an MLP checkpoint with autoregressive rollout.")
     parser.add_argument("dataset_path", nargs="?", default=None, help="Split directory containing test.csv.")
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
-    parser.add_argument("--model-checkpoint", "--model_checkpoint", type=Path, default="results/mlp_grav_collapse.ckpt")
+    parser.add_argument("--model-checkpoint", "--model_checkpoint", type=Path, default=config.TEST_MODEL_CHECKPOINT)
     parser.add_argument("--test-dir", "--test_dir", "--test-csv", type=Path, default=None)
-    parser.add_argument("--output-dir", "--output_dir", type=Path, default="results/test_results")
+    parser.add_argument("--output-dir", "--output_dir", type=Path, default=config.TEST_OUTPUT_DIR)
     parser.add_argument("--species", nargs="+", default=DEFAULT_SPECIES)
     parser.add_argument("--num-tracers", "--num_tracers", type=int, default=10)
     args = parser.parse_args()

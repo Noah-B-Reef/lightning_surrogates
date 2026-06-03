@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 
@@ -7,8 +8,9 @@ import optuna
 import pytorch_lightning as pl
 import torch
 from sqlalchemy.exc import OperationalError
+from optuna.trial import TrialState
 
-import config
+import settings as config
 from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
 from model import MLP
@@ -143,6 +145,37 @@ def save_best_params(best_params, results_dir, best_value):
     return json_path, txt_path
 
 
+def sqlite_path_from_storage(storage):
+    match = re.fullmatch(r"sqlite:///(.+)", storage)
+    if match is None:
+        return None
+    return Path(match.group(1)).expanduser().resolve()
+
+
+def reset_sqlite_storage(storage):
+    sqlite_path = sqlite_path_from_storage(storage)
+    if sqlite_path is None:
+        raise ValueError("--journal-mode fresh is only supported for sqlite:/// storage URLs.")
+    for path in (
+        sqlite_path,
+        Path(f"{sqlite_path}-journal"),
+        Path(f"{sqlite_path}-wal"),
+        Path(f"{sqlite_path}-shm"),
+    ):
+        if path.exists():
+            path.unlink()
+            print(f"Removed {path}", flush=True)
+
+
+def finished_trial_count(study):
+    finished_states = {TrialState.COMPLETE, TrialState.PRUNED, TrialState.FAIL}
+    return sum(
+        1
+        for trial in study.get_trials(deepcopy=False)
+        if trial.state in finished_states
+    )
+
+
 def create_study_with_retry(args, storage, retries=5, delay_seconds=2.0):
     """Create or load an Optuna study, tolerating concurrent SQLite initialization."""
     for attempt in range(retries + 1):
@@ -177,17 +210,31 @@ def main():
         help="Split directory with train/val/test.csv (default: best-sampler split).",
     )
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
-    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR / "optimization")
+    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_OPTUNA_RESULTS_DIR)
     parser.add_argument("--num-trials", type=int, default=config.OPTUNA_N_TRIALS)
     parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_TUNE_EPOCHS)
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_STUDY_NAME)
     parser.add_argument("--storage", type=str, default=None)
+    parser.add_argument(
+        "--journal-mode",
+        choices=("resume", "fresh"),
+        default=config.OPTUNA_JOURNAL_MODE,
+        help=(
+            "resume: reuse the existing Optuna journal and run only enough trials "
+            "to reach --num-trials finished trials. fresh: remove the SQLite "
+            "journal and start a new study."
+        ),
+    )
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
     parser.add_argument("--patience", type=int, default=config.OPTUNA_PRUNER_PATIENCE)
-    parser.add_argument("--min-relative-improvement", type=float, default=0.02)
+    parser.add_argument(
+        "--min-relative-improvement",
+        type=float,
+        default=config.OPTUNA_MIN_RELATIVE_IMPROVEMENT,
+    )
     args = parser.parse_args()
 
     dataset_path = args.data_dir or args.dataset_path
@@ -195,14 +242,23 @@ def main():
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
 
-    storage = args.storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
+    configured_storage = None if config.OPTUNA_STORAGE == "auto" else config.OPTUNA_STORAGE
+    storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
+    if args.journal_mode == "fresh":
+        reset_sqlite_storage(storage)
     study = create_study_with_retry(args, storage)
+    existing_finished_trials = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
+    trials_to_run = max(0, args.num_trials - existing_finished_trials)
     print(
-        f"Starting Optuna study '{args.study_name}' with {args.num_trials} trials "
-        f"and up to {args.tune_epochs} epochs per trial.",
+        f"Starting Optuna study '{args.study_name}' with journal_mode={args.journal_mode}, "
+        f"finished_trials={existing_finished_trials}, target_trials={args.num_trials}, "
+        f"trials_to_run={trials_to_run}, and up to {args.tune_epochs} epochs per trial.",
         flush=True,
     )
-    study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=args.num_trials)
+    if trials_to_run > 0:
+        study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=trials_to_run)
+    else:
+        print("No new trials needed; journal already meets the requested target.", flush=True)
 
     raw_best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
     best_params = {key: raw_best_params[key] for key in TRAINING_PARAM_KEYS}
@@ -212,6 +268,9 @@ def main():
         "split_dir": str(split_dir),
         "study_name": args.study_name,
         "storage": storage,
+        "journal_mode": args.journal_mode,
+        "target_trials": args.num_trials,
+        "finished_trials": finished_trial_count(study),
         "best_value": study.best_value,
         "best_trial": study.best_trial.number,
         "best_params": best_params,
