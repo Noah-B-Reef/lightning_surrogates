@@ -25,14 +25,6 @@ export MLP_DATA_DIR="${DATA_DIR}"
 export MLP_RESULTS_DIR="${RESULTS_DIR}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
-prepare_logging() {
-    local label="$1"
-    local job_id="${SLURM_JOB_ID:-manual}"
-    mkdir -p "${RESULTS_DIR}/output" "${RESULTS_DIR}/error"
-    exec > >(tee -a "${RESULTS_DIR}/output/${label}_output_${job_id}.txt")
-    exec 2> >(tee -a "${RESULTS_DIR}/error/${label}_error_${job_id}.txt" >&2)
-}
-
 activate_conda() {
     if command -v module >/dev/null 2>&1; then
         module list || true

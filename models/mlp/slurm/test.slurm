@@ -22,7 +22,6 @@ fi
 trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
 
 cd "${SCRIPT_DIR}"
-prepare_logging "test"
 validate_split_dir
 print_config_summary
 activate_conda

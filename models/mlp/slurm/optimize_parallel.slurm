@@ -23,7 +23,6 @@ trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit 
 
 cd "${SCRIPT_DIR}"
 mkdir -p "${OPTUNA_PARALLEL_RESULTS_DIR}"
-prepare_logging "optimize_parallel"
 validate_split_dir
 print_config_summary
 echo "PARALLEL_STUDY_NAME=${PARALLEL_STUDY_NAME}"

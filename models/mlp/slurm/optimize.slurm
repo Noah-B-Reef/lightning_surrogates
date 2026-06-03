@@ -23,7 +23,6 @@ trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit 
 
 cd "${SCRIPT_DIR}"
 mkdir -p "${OPTUNA_RESULTS_DIR}"
-prepare_logging "optimize"
 validate_split_dir
 print_config_summary
 activate_conda
