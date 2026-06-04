@@ -69,11 +69,16 @@ accepted; check runtime failures with `sacct -j <jobid>` and the configured
 `results/output/optimize_parallel_<jobid>.out` and
 `results/error/optimize_parallel_<jobid>.err` files.
 
-`--num-trials` is the total trial count across all ranks. The default parallel
-study name is `mlp_grav_collapse_optimization_parallel`; set `--study-name` or
-`STUDY_NAME` to reuse a different study intentionally. Rank 0 waits for the
-requested total to finish, then writes `best_params.json`, `best_params.txt`,
-and `optimization_summary.json`.
+Like the serial optimizer, `--num-trials` is the target number of finished
+trials in the study, not a per-run increment. On resume the ranks run only
+enough new trials (distributed across ranks) to reach that target; if the study
+already has that many finished trials, no new trials run. Use
+`--trials-per-worker` for explicit additive behavior instead: each rank runs
+exactly that many new trials on top of whatever is already finished. The default
+parallel study name is `mlp_grav_collapse_optimization_parallel`; set
+`--study-name` or `STUDY_NAME` to reuse a different study intentionally. Rank 0
+waits for the target total to finish, then writes `best_params.json`,
+`best_params.txt`, and `optimization_summary.json`.
 
 ## Train Final Model
 

@@ -177,16 +177,22 @@ def main():
 
     initial_finished = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     if args.trials_per_worker is None:
-        worker_trials = assigned_trials(args.num_trials, world_size, rank)
-        target_new_trials = args.num_trials
+        # Match the serial optimizer: --num-trials is the target number of
+        # finished trials in the study, so only run enough new trials to reach
+        # it. If the study already has that many finished trials, run none.
+        trials_to_run = max(0, args.num_trials - initial_finished)
+        worker_trials = assigned_trials(trials_to_run, world_size, rank)
+        target_finished_trials = max(args.num_trials, initial_finished)
     else:
+        # Explicit per-worker override stays additive: each rank runs exactly
+        # trials_per_worker new trials on top of whatever is already finished.
         worker_trials = args.trials_per_worker
-        target_new_trials = args.trials_per_worker * world_size
-    target_finished_trials = initial_finished + target_new_trials
+        target_finished_trials = initial_finished + args.trials_per_worker * world_size
     print(
         f"[rank {rank}/{world_size} node {node_id}] study={args.study_name} "
-        f"worker_trials={worker_trials} target_new_trials={target_new_trials} "
+        f"worker_trials={worker_trials} "
         f"initial_finished_trials={initial_finished} "
+        f"target_finished_trials={target_finished_trials} "
         f"storage={storage}",
         flush=True,
     )
@@ -219,7 +225,8 @@ def main():
         "study_name": args.study_name,
         "storage": storage,
         "world_size": world_size,
-        "target_new_trials": target_new_trials,
+        "target_trials": target_finished_trials,
+        "initial_finished_trials": initial_finished,
         "finished_trials": finished,
         "best_value": study.best_value,
         "best_trial": study.best_trial.number,
