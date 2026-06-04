@@ -1,5 +1,6 @@
 import argparse
 import json
+import random
 import re
 import time
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import optuna
 import pytorch_lightning as pl
 import torch
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from optuna.trial import TrialState
 
@@ -146,10 +148,51 @@ def save_best_params(best_params, results_dir, best_value):
 
 
 def sqlite_path_from_storage(storage):
-    match = re.fullmatch(r"sqlite:///(.+)", storage)
+    match = re.fullmatch(r"sqlite:///([^?]+)(?:\?.*)?", storage)
     if match is None:
         return None
     return Path(match.group(1)).expanduser().resolve()
+
+
+def is_sqlite_storage(storage):
+    return isinstance(storage, str) and storage.startswith("sqlite:")
+
+
+def build_optuna_storage(storage, sqlite_timeout_seconds=600):
+    """Return an Optuna storage object with safer SQLite concurrency defaults."""
+    if not is_sqlite_storage(storage):
+        return storage
+
+    rdb_storage = optuna.storages.RDBStorage(
+        url=storage,
+        engine_kwargs={
+            "connect_args": {"timeout": sqlite_timeout_seconds},
+            "pool_pre_ping": True,
+        },
+    )
+
+    @event.listens_for(rdb_storage.engine, "connect")
+    def configure_sqlite_connection(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute(f"PRAGMA busy_timeout = {sqlite_timeout_seconds * 1000}")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.close()
+
+    return rdb_storage
+
+
+def is_retryable_storage_error(exc):
+    message = str(exc).lower()
+    retryable_fragments = (
+        "already exists",
+        "database is locked",
+        "database table is locked",
+        "database schema is locked",
+        "sqlite_busy",
+        "sqlite_locked",
+    )
+    return any(fragment in message for fragment in retryable_fragments)
 
 
 def reset_sqlite_storage(storage):
@@ -199,17 +242,17 @@ def create_study_with_retry(args, storage, retries=5, delay_seconds=2.0):
         try:
             return optuna.create_study(
                 study_name=args.study_name,
-                storage=storage,
+                storage=build_optuna_storage(storage),
                 direction="minimize",
                 load_if_exists=True,
                 pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
             )
         except OperationalError as exc:
-            if "already exists" not in str(exc).lower() or attempt == retries:
+            if not is_retryable_storage_error(exc) or attempt == retries:
                 raise
-            sleep_time = delay_seconds * (attempt + 1)
+            sleep_time = delay_seconds * (attempt + 1) + random.uniform(0.0, delay_seconds)
             print(
-                "Optuna storage initialization raced with another process; "
+                "Optuna storage operation raced with another process; "
                 f"retrying in {sleep_time:.1f}s.",
                 flush=True,
             )

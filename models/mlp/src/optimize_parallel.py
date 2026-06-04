@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import random
 import time
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from optimize import (
     objective,
     prepare_storage_for_resume,
     save_best_params,
+    is_retryable_storage_error,
+    is_sqlite_storage,
     sqlite_path_from_storage,
 )
 
@@ -22,10 +25,6 @@ def parse_rank_context():
     world_size = int(os.environ.get("SLURM_NTASKS", os.environ.get("PMI_SIZE", "1")))
     node_id = os.environ.get("SLURM_NODEID", "0")
     return rank, world_size, node_id
-
-
-def is_sqlite_storage(storage):
-    return storage.startswith("sqlite:")
 
 
 def assigned_trials(total_trials, world_size, rank):
@@ -75,6 +74,34 @@ def wait_for_trials(study, target_trials, timeout_seconds, poll_seconds):
 def filtered_best_params(study):
     raw_best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
     return {key: raw_best_params[key] for key in TRAINING_PARAM_KEYS}
+
+
+def optimize_worker_trials_with_retry(study, args, split_dir, worker_trials, storage, rank):
+    completed = 0
+    consecutive_failures = 0
+    max_consecutive_failures = 8
+
+    while completed < worker_trials:
+        try:
+            study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=1)
+            completed += 1
+            consecutive_failures = 0
+        except Exception as exc:
+            if not is_sqlite_storage(storage) or not is_retryable_storage_error(exc):
+                raise
+            consecutive_failures += 1
+            if consecutive_failures > max_consecutive_failures:
+                raise
+            sleep_time = min(300.0, 5.0 * consecutive_failures) + random.uniform(0.0, 3.0)
+            print(
+                f"[rank {rank}] SQLite storage contention after "
+                f"{completed}/{worker_trials} assigned trials; retrying in {sleep_time:.1f}s.",
+                flush=True,
+            )
+            time.sleep(sleep_time)
+            study = create_study_with_retry(args, storage)
+
+    return study
 
 
 def main():
@@ -165,7 +192,14 @@ def main():
     )
 
     if worker_trials > 0:
-        study.optimize(lambda trial: objective(trial, args, split_dir), n_trials=worker_trials)
+        study = optimize_worker_trials_with_retry(
+            study,
+            args,
+            split_dir,
+            worker_trials,
+            storage,
+            rank,
+        )
     else:
         print(f"[rank {rank}] no assigned trials; exiting worker loop.", flush=True)
 

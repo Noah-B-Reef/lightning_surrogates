@@ -43,7 +43,8 @@ Outputs:
 
 `src/optimize_parallel.py` lets multiple Slurm ranks run Optuna trials against
 one shared study. When no storage is provided, it creates
-`optuna.sqlite3` under the parallel results directory. Server-backed Optuna
+`optuna.sqlite3` under the parallel results directory with longer SQLite busy
+timeouts and worker retries for transient lock contention. Server-backed Optuna
 storage such as PostgreSQL or MySQL is still recommended for multi-node runs.
 
 ```bash
@@ -62,10 +63,10 @@ slurm/submit_optimize_parallel.sh
 
 The submit wrapper creates the output/error directories before calling `sbatch`.
 If `PARALLEL_OPTUNA_STORAGE` is unset, the job defaults to
-`results/optimization_parallel/optuna.sqlite3` and prints a warning because
-SQLite is not recommended for multi-node Optuna workers. `sbatch` only reports
-whether the job was accepted; check runtime failures with `sacct -j <jobid>` and
-the configured `results/output/optimize_parallel_<jobid>.out` and
+`results/optimization_parallel/optuna.sqlite3` and enables retry handling for
+short SQLite write-lock collisions. `sbatch` only reports whether the job was
+accepted; check runtime failures with `sacct -j <jobid>` and the configured
+`results/output/optimize_parallel_<jobid>.out` and
 `results/error/optimize_parallel_<jobid>.err` files.
 
 `--num-trials` is the total trial count across all ranks. The default parallel
@@ -183,7 +184,7 @@ sbatch slurm/optimize_parallel.slurm
 
 Set `PARALLEL_OPTUNA_STORAGE` in `config.sh` to a server-backed Optuna
 RDB URL before using the parallel optimizer. SQLite is not safe for multi-node
-Optuna workers.
+Optuna workers at high concurrency, even with retry handling.
 
 Use a different config file without editing the repository:
 
