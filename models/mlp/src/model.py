@@ -16,6 +16,25 @@ class MLP(pl.LightningModule):
         output_size = int(config["output_size"])
         self.learning_rate = float(config.get("learning_rate", 1e-3))
 
+        # Physical-parameter normalization. Stats are computed on the training
+        # split (see data.GravCollapseDataModule.phys_norm_config) and stored
+        # in the saved hyperparameters, so they travel with the checkpoint and
+        # are applied identically during autoregressive rollout. Defaults make
+        # this a no-op for checkpoints trained before normalization existed.
+        self.num_phys = int(config.get("num_phys", 0))
+        log_mask = config.get("phys_log_mask") or [0.0] * self.num_phys
+        phys_mean = config.get("phys_mean") or [0.0] * self.num_phys
+        phys_std = config.get("phys_std") or [1.0] * self.num_phys
+        self.register_buffer(
+            "phys_log_mask", torch.tensor(log_mask, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "phys_mean", torch.tensor(phys_mean, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "phys_std", torch.tensor(phys_std, dtype=torch.float32)
+        )
+
         layers = [
             nn.Linear(num_inputs, hidden_units),
             nn.LayerNorm(hidden_units),
@@ -36,7 +55,22 @@ class MLP(pl.LightningModule):
         self.val_mse = torchmetrics.MeanSquaredError()
         self.test_mse = torchmetrics.MeanSquaredError()
 
+    def _normalize_phys(self, x):
+        """Apply log10 (multi-decade cols) + standardization to the leading
+        physical-parameter columns, leaving the log10 abundances untouched."""
+        n = self.num_phys
+        if n == 0:
+            return x
+        phys, rest = x[:, :n], x[:, n:]
+        mask = self.phys_log_mask.bool()
+        if mask.any():
+            logged = torch.log10(torch.clamp(phys, min=1e-30))
+            phys = torch.where(mask, logged, phys)
+        phys = (phys - self.phys_mean) / self.phys_std
+        return torch.cat([phys, rest], dim=1)
+
     def forward(self, x):
+        x = self._normalize_phys(x)
         return self.output_proj(self.network(x))
 
     def _step(self, batch, stage):

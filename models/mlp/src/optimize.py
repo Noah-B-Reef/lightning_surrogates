@@ -69,6 +69,7 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
+        **data.phys_norm_config(),
     }
     model = MLP(model_config)
     train_batches = len(data.train_dataloader())

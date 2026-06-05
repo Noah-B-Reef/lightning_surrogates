@@ -11,6 +11,11 @@ import settings as config
 
 PHYS_COLS = ("Density", "gasTemp", "dustTemp", "Av", "radfield", "zeta")
 
+# Physical parameters that span many orders of magnitude and are strictly
+# positive. These are log10-transformed before standardization; the rest are
+# standardized directly.
+PHYS_LOG_COLS = ("Density", "radfield", "zeta")
+
 
 class GravCollapseDataset(Dataset):
     """
@@ -96,6 +101,39 @@ class GravCollapseDataset(Dataset):
         return len(self._feature_names)
 
     @property
+    def num_phys(self):
+        return len(self._phys_cols)
+
+    def phys_stats(self):
+        """Per-column normalization stats for the physical parameters.
+
+        Returns ``(log_mask, mean, std)`` as float32 arrays of length
+        ``num_phys``. Multi-decade columns (see ``PHYS_LOG_COLS``) are
+        log10-transformed before the mean/std are computed, matching the
+        transform applied inside the model's forward pass.
+        """
+        n = len(self._phys_cols)
+        if n == 0:
+            empty = np.zeros(0, dtype=np.float32)
+            return empty, empty, empty.copy()
+        mask = np.array(
+            [col in PHYS_LOG_COLS for col in self._phys_cols], dtype=bool
+        )
+        transformed = self._phys.astype(np.float64, copy=True)
+        if mask.any():
+            transformed[:, mask] = np.log10(
+                np.maximum(transformed[:, mask], 1e-30)
+            )
+        mean = transformed.mean(axis=0)
+        std = transformed.std(axis=0)
+        std[std < 1e-8] = 1.0  # guard against constant columns
+        return (
+            mask.astype(np.float32),
+            mean.astype(np.float32),
+            std.astype(np.float32),
+        )
+
+    @property
     def num_targets(self):
         return len(self._target_names)
 
@@ -128,6 +166,11 @@ class GravCollapseDataModule(pl.LightningDataModule):
         self._num_targets = schema_ds.num_targets
         self._feature_names = schema_ds.feature_names()
         self._target_names = schema_ds.target_names
+        # Normalization stats are always derived from the training split when
+        # it is available, so val/test never leak into the transform.
+        stats_ds = getattr(self, "train_ds", None) or schema_ds
+        self._num_phys = stats_ds.num_phys
+        self._phys_stats = stats_ds.phys_stats()
 
     def train_dataloader(self):
         return DataLoader(
@@ -166,6 +209,20 @@ class GravCollapseDataModule(pl.LightningDataModule):
     @property
     def num_targets(self):
         return self._num_targets
+
+    @property
+    def num_phys(self):
+        return self._num_phys
+
+    def phys_norm_config(self):
+        """Normalization fields to merge into the model config (JSON-safe)."""
+        log_mask, mean, std = self._phys_stats
+        return {
+            "num_phys": int(self._num_phys),
+            "phys_log_mask": log_mask.tolist(),
+            "phys_mean": mean.tolist(),
+            "phys_std": std.tolist(),
+        }
 
     @property
     def feature_names(self):
