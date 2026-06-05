@@ -61,6 +61,7 @@ def objective(trial, args, split_dir):
         data_dir=str(split_dir),
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
+        max_rollout_steps=args.rollout_steps,
     )
     data.setup("fit")
     model_config = {
@@ -287,6 +288,7 @@ def main():
         ),
     )
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
+    parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)

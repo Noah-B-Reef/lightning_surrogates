@@ -15,6 +15,7 @@ class MLP(pl.LightningModule):
         hidden_units = int(config["num_neurons_per_hidden_layer"])
         output_size = int(config["output_size"])
         self.learning_rate = float(config.get("learning_rate", 1e-3))
+        self.rollout_steps = int(config.get("rollout_steps", 1))
 
         # Physical-parameter normalization. Stats are computed on the training
         # split (see data.GravCollapseDataModule.phys_norm_config) and stored
@@ -73,12 +74,36 @@ class MLP(pl.LightningModule):
         x = self._normalize_phys(x)
         return self.output_proj(self.network(x))
 
+    def _rollout(self, initial, phys_seq):
+        current = initial[:, self.num_phys:]
+        preds = []
+        steps = phys_seq.shape[1]
+        for step in range(steps):
+            x = torch.cat([phys_seq[:, step, :], current], dim=1)
+            current = self(x)
+            preds.append(current)
+        return torch.stack(preds, dim=1)
+
+    def _masked_rollout_loss(self, preds, targets, mask):
+        per_value = F.smooth_l1_loss(preds, targets, reduction="none")
+        per_step = per_value.mean(dim=-1)
+        masked = per_step * mask
+        return masked.sum() / mask.sum().clamp_min(1.0)
+
     def _step(self, batch, stage):
-        initial, targets = batch
-        preds = self(initial)
-        loss = F.smooth_l1_loss(preds, targets)
-        metric = getattr(self, f"{stage}_mse")
-        metric(preds, targets)
+        if len(batch) == 2:
+            initial, targets = batch
+            preds = self(initial)
+            loss = F.smooth_l1_loss(preds, targets)
+            metric = getattr(self, f"{stage}_mse")
+            metric(preds, targets)
+        else:
+            initial, phys_seq, targets, mask = batch
+            preds = self._rollout(initial, phys_seq)
+            loss = self._masked_rollout_loss(preds, targets, mask)
+            valid = mask.bool()
+            metric = getattr(self, f"{stage}_mse")
+            metric(preds[valid], targets[valid])
         self.log(f"{stage}_loss", loss, prog_bar=(stage != "test"))
         self.log(f"{stage}_mse", metric, on_step=False, on_epoch=True)
         return loss

@@ -20,6 +20,11 @@ When no split path is given, every script defaults to the best-sampler split exp
 python src/optimize.py /path/to/split   --results-dir /path/to/results/optimization   --num-trials 25   --tune-epochs 50
 ```
 
+Optimization and final training use a masked autoregressive loss over up to
+`MODEL_ROLLOUT_STEPS` future steps, defaulting to 5. Short tracer tails are
+masked, so samples near the end of a trajectory contribute only their available
+future steps.
+
 By default, optimization resumes from the configured SQLite journal and treats
 `--num-trials` as the target number of finished trials in that journal. For
 example, if the journal already has 10 finished trials and `--num-trials 25`,
@@ -135,12 +140,29 @@ test output paths.
 
 Default Optuna search space:
 
-- hidden layers: 2–8
-- hidden units: 128–1024, step 128
-- learning rate: 1e-5 to 1e-2, log scale
-- batch size: 16, 32, 64, 128
+- hidden layers: 2–5
+- hidden units: 128–512, step 128
+- learning rate: 1e-4 to 5e-3, log scale
+- batch size: 32, 64, 128
 
-This broadens capacity beyond the previous shallow/narrow defaults while avoiding the largest 2048-unit models unless explicitly configured.
+The standard and local optimizers share this search space.
+
+## Local MPS Helpers
+
+Local-only wrappers live under:
+
+```bash
+src/local_impl/
+```
+
+Run the local optimize -> train -> test path with:
+
+```bash
+python src/local_impl/run_local.py
+```
+
+These helpers support optional tracer subsampling and cache loaded datasets
+across threaded local Optuna trials.
 
 ## Environment Variables
 
@@ -151,6 +173,7 @@ This broadens capacity beyond the previous shallow/narrow defaults while avoidin
 - `RESULTS_DIR`: result root for Slurm wrappers.
 - `OPTUNA_RESULTS_DIR`: serial Optuna output directory.
 - `N_TRIALS`, `TUNE_EPOCHS`, `TRAIN_EPOCHS`: Slurm wrapper runtime settings.
+- `MODEL_ROLLOUT_STEPS`: maximum rollout horizon used by the training loss.
 - `ACCELERATOR`, `DEVICES`, `NUM_WORKERS`: compute settings.
 - `MLP_SLURM_CONFIG`: optional path to a replacement config.sh script.
 
@@ -186,6 +209,9 @@ Submit parallel Optuna optimization:
 ```bash
 sbatch slurm/optimize_parallel.slurm
 ```
+
+The Slurm optimize/train wrappers request `--cpus-per-task=8`, so
+`CONFIG_NUM_WORKERS=auto` resolves to eight DataLoader workers by default.
 
 Set `PARALLEL_OPTUNA_STORAGE` in `config.sh` to a server-backed Optuna
 RDB URL before using the parallel optimizer. SQLite is not safe for multi-node

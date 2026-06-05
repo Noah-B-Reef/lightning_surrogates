@@ -26,6 +26,7 @@ export MODEL_BATCH_SIZE=32
 export MODEL_LEARNING_RATE=1e-3
 export MODEL_EPOCHS=100
 export MODEL_LOG_ABUNDANCES="true"
+export MODEL_ROLLOUT_STEPS=5
 
 # Hyperparameter Optimization (Optimize) Settings
 export N_TRIALS=25

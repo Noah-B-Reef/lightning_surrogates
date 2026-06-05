@@ -28,9 +28,10 @@ class GravCollapseDataset(Dataset):
         log10 abundances at t + 1
     """
 
-    def __init__(self, csv_path):
+    def __init__(self, csv_path, max_rollout_steps=1):
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"Split CSV not found: {csv_path}")
+        self.max_rollout_steps = max(1, int(max_rollout_steps))
 
         header = pd.read_csv(csv_path, nrows=0)
         all_cols = header.columns.tolist()
@@ -57,14 +58,18 @@ class GravCollapseDataset(Dataset):
         self._abund = np.log10(np.maximum(abund, 1e-30)).astype(np.float32, copy=False)
 
         starts = []
+        rollout_lengths = []
         sample_tracers = []
         for tracer_id, row_indices in df.groupby("Tracer", sort=False).indices.items():
             num_steps = len(row_indices)
             if num_steps <= 1:
                 continue
             first_row = int(row_indices[0])
-            valid_starts = first_row + np.arange(num_steps - 1, dtype=np.int64)
+            offsets = np.arange(num_steps - 1, dtype=np.int64)
+            valid_starts = first_row + offsets
+            valid_lengths = np.minimum(self.max_rollout_steps, num_steps - 1 - offsets)
             starts.append(valid_starts)
+            rollout_lengths.append(valid_lengths.astype(np.int64, copy=False))
             sample_tracers.append(np.full(len(valid_starts), tracer_id))
 
         self._sample_starts = (
@@ -77,6 +82,11 @@ class GravCollapseDataset(Dataset):
             if sample_tracers
             else np.empty(0, dtype=self._tracer_by_row.dtype)
         )
+        self._rollout_lengths = (
+            np.concatenate(rollout_lengths).astype(np.int64, copy=False)
+            if rollout_lengths
+            else np.empty(0, dtype=np.int64)
+        )
 
     def __len__(self):
         return len(self._sample_starts)
@@ -86,8 +96,21 @@ class GravCollapseDataset(Dataset):
         initial = np.concatenate([self._phys[start], self._abund[start]]).astype(
             np.float32, copy=False
         )
-        target = self._abund[start + 1]
-        return torch.from_numpy(initial), torch.from_numpy(target)
+        horizon = self.max_rollout_steps
+        valid_steps = int(self._rollout_lengths[idx])
+        phys_seq = np.zeros((horizon, len(self._phys_cols)), dtype=np.float32)
+        target_seq = np.zeros((horizon, len(self._target_names)), dtype=np.float32)
+        mask = np.zeros(horizon, dtype=np.float32)
+        for step in range(valid_steps):
+            phys_seq[step] = self._phys[start + step]
+            target_seq[step] = self._abund[start + step + 1]
+            mask[step] = 1.0
+        return (
+            torch.from_numpy(initial),
+            torch.from_numpy(phys_seq),
+            torch.from_numpy(target_seq),
+            torch.from_numpy(mask),
+        )
 
     def feature_names(self):
         return self._feature_names
@@ -148,19 +171,30 @@ class GravCollapseDataModule(pl.LightningDataModule):
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=False,
+        max_rollout_steps=config.ROLLOUT_STEPS,
     ):
         super().__init__()
         self.data_dir = str(data_dir)
         self.batch_size = int(batch_size)
         self.num_workers = int(num_workers)
         self.pin_memory = bool(pin_memory)
+        self.max_rollout_steps = max(1, int(max_rollout_steps))
 
     def setup(self, stage=None):
         if stage in (None, "fit"):
-            self.train_ds = GravCollapseDataset(os.path.join(self.data_dir, "train.csv"))
-            self.val_ds = GravCollapseDataset(os.path.join(self.data_dir, "val.csv"))
+            self.train_ds = GravCollapseDataset(
+                os.path.join(self.data_dir, "train.csv"),
+                max_rollout_steps=self.max_rollout_steps,
+            )
+            self.val_ds = GravCollapseDataset(
+                os.path.join(self.data_dir, "val.csv"),
+                max_rollout_steps=self.max_rollout_steps,
+            )
         if stage in (None, "test", "predict"):
-            self.test_ds = GravCollapseDataset(os.path.join(self.data_dir, "test.csv"))
+            self.test_ds = GravCollapseDataset(
+                os.path.join(self.data_dir, "test.csv"),
+                max_rollout_steps=self.max_rollout_steps,
+            )
         schema_ds = getattr(self, "train_ds", None) or getattr(self, "test_ds", None)
         self._num_features = schema_ds.num_features
         self._num_targets = schema_ds.num_targets
@@ -222,6 +256,7 @@ class GravCollapseDataModule(pl.LightningDataModule):
             "phys_log_mask": log_mask.tolist(),
             "phys_mean": mean.tolist(),
             "phys_std": std.tolist(),
+            "rollout_steps": int(self.max_rollout_steps),
         }
 
     @property

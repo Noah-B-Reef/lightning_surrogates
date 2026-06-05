@@ -6,6 +6,7 @@
 #SBATCH --partition=gh
 #SBATCH --nodes=5
 #SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
@@ -47,6 +48,7 @@ srun python "${SCRIPT_DIR}/src/optimize_parallel.py" \
     --journal-mode "${JOURNAL_MODE}" \
     --num-trials "${PARALLEL_N_TRIALS}" \
     --tune-epochs "${PARALLEL_TUNE_EPOCHS}" \
+    --rollout-steps "${MODEL_ROLLOUT_STEPS}" \
     --accelerator "${ACCELERATOR}" \
     --devices "${DEVICES}" \
     --precision "${PRECISION}" \

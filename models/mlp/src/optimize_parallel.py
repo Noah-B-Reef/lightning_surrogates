@@ -10,6 +10,7 @@ import optuna
 import settings as config
 from optimize import (
     TRAINING_PARAM_KEYS,
+    build_optuna_storage,
     create_study_with_retry,
     objective,
     prepare_storage_for_resume,
@@ -20,17 +21,16 @@ from optimize import (
 )
 
 
+# Stamped on the study by rank 0 after a fresh reset so other ranks can tell the
+# newly created study apart from the stale pre-reset one (see wait_for_fresh_study).
+FRESH_STUDY_MARKER = "fresh_session_marker"
+
+
 def parse_rank_context():
     rank = int(os.environ.get("SLURM_PROCID", os.environ.get("PMI_RANK", "0")))
     world_size = int(os.environ.get("SLURM_NTASKS", os.environ.get("PMI_SIZE", "1")))
     node_id = os.environ.get("SLURM_NODEID", "0")
     return rank, world_size, node_id
-
-
-def assigned_trials(total_trials, world_size, rank):
-    base = total_trials // world_size
-    remainder = total_trials % world_size
-    return base + (1 if rank < remainder else 0)
 
 
 def reset_storage(args, storage):
@@ -104,6 +104,53 @@ def optimize_worker_trials_with_retry(study, args, split_dir, worker_trials, sto
     return study
 
 
+def run_until_target(study, args, split_dir, target_finished_trials, storage, rank):
+    """Run trials until the SHARED study reaches target_finished_trials.
+
+    The stop condition is checked against the shared study before each trial, so
+    workers never pre-divide a remaining budget from a per-rank snapshot of the
+    finished count. That snapshot races: ranks start at different times and would
+    disagree on how many trials remain, making the study over- or under-shoot the
+    target. Here every rank simply keeps contributing trials until the global
+    finished count reaches the target, so the total is correct regardless of
+    start order. Overshoot is bounded by the number of trials in flight across
+    all ranks (<= world_size).
+    """
+    while finished_trial_count(study) < target_finished_trials:
+        study = optimize_worker_trials_with_retry(study, args, split_dir, 1, storage, rank)
+    return study
+
+
+def wait_for_fresh_study(args, storage, expected_marker, timeout_seconds, poll_seconds, rank):
+    """Wait until rank 0 has reset and recreated the study for this run.
+
+    In fresh mode, non-zero ranks must not create the study themselves: doing so
+    races rank 0's reset (a worker could create/load the study before rank 0
+    deletes it, or attach to the stale pre-reset study). Instead they only *load*
+    the study and wait until it carries the marker rank 0 stamps on the freshly
+    created study, so they can never attach to the old study or create a competing
+    one.
+    """
+    wrapped_storage = build_optuna_storage(storage)
+    deadline = time.time() + timeout_seconds
+    while True:
+        try:
+            study = optuna.load_study(study_name=args.study_name, storage=wrapped_storage)
+        except KeyError:
+            study = None  # Rank 0 has not created the fresh study yet.
+        if study is not None and study.user_attrs.get(FRESH_STUDY_MARKER) == expected_marker:
+            return study
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"[rank {rank}] timed out waiting for rank 0 to initialize a fresh study."
+            )
+        print(
+            f"[rank {rank}] waiting for rank 0 to initialize a fresh study.",
+            flush=True,
+        )
+        time.sleep(poll_seconds)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run Optuna MLP optimization with multiple Slurm worker ranks."
@@ -122,6 +169,7 @@ def main():
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_PARALLEL_STUDY_NAME)
     parser.add_argument("--storage", type=str, default=None)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
+    parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
@@ -162,14 +210,26 @@ def main():
     dataset_path = args.data_dir or args.dataset_path
     split_dir = config.resolve_split_dir(dataset_path)
 
+    # Shared across all ranks of the same Slurm job, so every rank agrees on the
+    # marker identifying this run's fresh study. Falls back to a constant when no
+    # job id is present (single-node/local), which is still safe because the old
+    # study is deleted before the marker is stamped.
+    fresh_marker = os.environ.get("SLURM_JOB_ID") or os.environ.get("PMI_JOBID") or "fresh"
     if args.journal_mode == "fresh":
         if rank == 0:
             reset_storage(args, storage)
             prepare_storage_for_resume(storage)
             study = create_study_with_retry(args, storage)
+            study.set_user_attr(FRESH_STUDY_MARKER, fresh_marker)
         else:
-            time.sleep(5.0)
-            study = create_study_with_retry(args, storage)
+            study = wait_for_fresh_study(
+                args,
+                storage,
+                fresh_marker,
+                timeout_seconds=args.finalize_timeout,
+                poll_seconds=args.finalize_poll_seconds,
+                rank=rank,
+            )
     else:
         if rank == 0:
             prepare_storage_for_resume(storage)
@@ -177,37 +237,43 @@ def main():
 
     initial_finished = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     if args.trials_per_worker is None:
-        # Match the serial optimizer: --num-trials is the target number of
-        # finished trials in the study, so only run enough new trials to reach
-        # it. If the study already has that many finished trials, run none.
-        trials_to_run = max(0, args.num_trials - initial_finished)
-        worker_trials = assigned_trials(trials_to_run, world_size, rank)
+        # Target-total mode (matches serial optimize.py): --num-trials is the
+        # desired number of finished trials in the SHARED study. Every rank keeps
+        # running new trials until that global count is reached, instead of
+        # pre-dividing a remaining budget from a per-rank snapshot of the finished
+        # count (which races because ranks start at different times).
         target_finished_trials = max(args.num_trials, initial_finished)
-    else:
-        # Explicit per-worker override stays additive: each rank runs exactly
-        # trials_per_worker new trials on top of whatever is already finished.
-        worker_trials = args.trials_per_worker
-        target_finished_trials = initial_finished + args.trials_per_worker * world_size
-    print(
-        f"[rank {rank}/{world_size} node {node_id}] study={args.study_name} "
-        f"worker_trials={worker_trials} "
-        f"initial_finished_trials={initial_finished} "
-        f"target_finished_trials={target_finished_trials} "
-        f"storage={storage}",
-        flush=True,
-    )
-
-    if worker_trials > 0:
-        study = optimize_worker_trials_with_retry(
-            study,
-            args,
-            split_dir,
-            worker_trials,
-            storage,
-            rank,
+        print(
+            f"[rank {rank}/{world_size} node {node_id}] study={args.study_name} "
+            f"mode=target-total initial_finished_trials={initial_finished} "
+            f"target_finished_trials={target_finished_trials} storage={storage}",
+            flush=True,
         )
+        study = run_until_target(study, args, split_dir, target_finished_trials, storage, rank)
     else:
-        print(f"[rank {rank}] no assigned trials; exiting worker loop.", flush=True)
+        # Explicit additive mode: each rank runs exactly trials_per_worker new
+        # trials. The per-rank counts are independent, so there is no shared-count
+        # race; the total added is trials_per_worker * world_size.
+        worker_trials = args.trials_per_worker
+        target_finished_trials = initial_finished + worker_trials * world_size
+        print(
+            f"[rank {rank}/{world_size} node {node_id}] study={args.study_name} "
+            f"mode=additive worker_trials={worker_trials} "
+            f"initial_finished_trials={initial_finished} "
+            f"target_finished_trials={target_finished_trials} storage={storage}",
+            flush=True,
+        )
+        if worker_trials > 0:
+            study = optimize_worker_trials_with_retry(
+                study,
+                args,
+                split_dir,
+                worker_trials,
+                storage,
+                rank,
+            )
+        else:
+            print(f"[rank {rank}] no assigned trials; exiting worker loop.", flush=True)
 
     if rank != 0:
         return

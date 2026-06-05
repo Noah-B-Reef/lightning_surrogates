@@ -75,6 +75,7 @@ print_config_summary() {
     echo "DEVICES=${DEVICES}"
     echo "PRECISION=${PRECISION}"
     echo "NUM_WORKERS=${NUM_WORKERS}"
+    echo "MODEL_ROLLOUT_STEPS=${MODEL_ROLLOUT_STEPS}"
     echo "SLURM_JOB_ID=${SLURM_JOB_ID:-unset}"
     echo "SLURM_NODELIST=${SLURM_NODELIST:-unset}"
     echo "SLURM_NTASKS=${SLURM_NTASKS:-unset}"

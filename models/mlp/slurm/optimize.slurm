@@ -6,6 +6,7 @@
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
@@ -41,6 +42,7 @@ python "${SCRIPT_DIR}/src/optimize.py" \
     "${OPTUNA_STORAGE_ARG[@]}" \
     --num-trials "${N_TRIALS}" \
     --tune-epochs "${TUNE_EPOCHS}" \
+    --rollout-steps "${MODEL_ROLLOUT_STEPS}" \
     --accelerator "${ACCELERATOR}" \
     --devices "${DEVICES}" \
     --precision "${PRECISION}" \

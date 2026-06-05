@@ -123,6 +123,7 @@ def train_final_model(
     devices=config.NUM_DEVICES,
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
+    rollout_steps=config.ROLLOUT_STEPS,
 ):
     split_dir = config.resolve_split_dir(split_dir)
     results_dir = Path(results_dir).expanduser().resolve()
@@ -137,6 +138,7 @@ def train_final_model(
         data_dir=str(split_dir),
         batch_size=int(best_config["batch_size"]),
         num_workers=int(num_workers),
+        max_rollout_steps=int(rollout_steps),
     )
     data.setup("fit")
     model_config = {
@@ -242,6 +244,7 @@ def main(
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
     save_epoch_checkpoints=True,
+    rollout_steps=config.ROLLOUT_STEPS,
 ):
     split_dir = data_dir or dataset_path
     if use_defaults:
@@ -261,6 +264,7 @@ def main(
         devices=devices,
         precision=precision,
         num_workers=num_workers,
+        rollout_steps=rollout_steps,
     )
 
 
@@ -274,6 +278,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-defaults", action="store_true")
     parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
+    parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
@@ -291,5 +296,6 @@ if __name__ == "__main__":
         devices=args.devices,
         precision=args.precision,
         num_workers=args.num_workers,
+        rollout_steps=args.rollout_steps,
         save_epoch_checkpoints=not args.no_epoch_checkpoints,
     )
