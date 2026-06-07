@@ -91,6 +91,76 @@ waits for the target total to finish, then writes `best_params.json`,
 python src/train.py /path/to/split   --results-dir /path/to/results   --config-file /path/to/results/optimization/best_params.json   --epochs 100
 ```
 
+Prediction behavior and rollout-loss horizon can be selected without editing
+the model code:
+
+```bash
+# Predict x_{t+1} directly with one-step rollout loss.
+python src/train.py /path/to/split \
+  --results-dir /path/to/results/direct_h1 \
+  --use-defaults --epochs 100 --rollout-steps 1 \
+  --prediction-mode direct --no-early-stopping --no-epoch-checkpoints
+
+# Predict x_{t+1} directly with five-step rollout loss.
+python src/train.py /path/to/split \
+  --results-dir /path/to/results/direct_h5 \
+  --use-defaults --epochs 100 --rollout-steps 5 \
+  --prediction-mode direct --no-early-stopping --no-epoch-checkpoints
+
+# Predict dx and advance with x_{t+1} = x_t + dx.
+python src/train.py /path/to/split \
+  --results-dir /path/to/results/delta_h5 \
+  --use-defaults --epochs 100 --rollout-steps 5 \
+  --prediction-mode delta --no-early-stopping --no-epoch-checkpoints
+```
+
+The prediction mode is stored in the checkpoint, so `test.py` automatically
+uses the correct direct or delta update during autoregressive rollout:
+
+```bash
+python src/test.py /path/to/split \
+  --model-checkpoint /path/to/results/mlp_grav_collapse.ckpt \
+  --output-dir /path/to/results/test_results \
+  --accelerator auto
+```
+
+### Fast Horizon-5 Profile
+
+Training supports independent controls for batch size, sample overlap,
+validation cost, cache layout, staged initialization, and architecture. The
+recommended speed-quality profile keeps the 3x256 LayerNorm architecture,
+initializes from a horizon-1 checkpoint, and reduces redundant data work:
+
+```bash
+python src/train.py /path/to/split \
+  --results-dir /path/to/results/fast_h5 \
+  --use-defaults --epochs 100 \
+  --rollout-steps 5 --prediction-mode direct \
+  --batch-size 1024 \
+  --train-sample-stride 2 \
+  --val-fraction 0.2 \
+  --val-every-n-epochs 5 \
+  --val-rollout-steps 1 \
+  --compact-batches \
+  --init-checkpoint /path/to/horizon1/mlp_grav_collapse.ckpt \
+  --no-early-stopping --no-epoch-checkpoints --no-logger
+```
+
+`--compact-batches` uses row-level memory-mapped arrays and constructs each
+batch vectorially. Compact caches omit duplicated `initial`, `phys_seq`,
+`target_seq`, and `mask` arrays. Existing full caches are migrated with hard
+links rather than reparsing the CSV.
+
+Architecture experiments are also CLI-selectable:
+
+```bash
+python src/train.py /path/to/split \
+  --use-defaults --hidden-layers 2 --hidden-units 128 --no-layer-norm
+```
+
+The smaller architecture is faster but performed substantially worse in the
+recorded full-rollout benchmark under `results/speed_bench/`.
+
 Outputs:
 
 ```text

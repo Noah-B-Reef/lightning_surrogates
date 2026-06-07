@@ -71,9 +71,17 @@ def rollout_tracer(model, tracer_df, phys_cols, abundance_cols, device):
         for step in range(len(tracer_df) - 1):
             phys_t = torch.tensor(phys[step], dtype=torch.float32, device=device)
             x = torch.cat([phys_t, current]).unsqueeze(0)
-            current = model(x).squeeze(0)
+            current = model.predict_next(x, current.unsqueeze(0)).squeeze(0)
             predictions.append(current.detach().cpu().numpy())
     return np.asarray(predictions), true_log
+
+
+def resolve_device(accelerator="auto"):
+    if accelerator in ("auto", "cuda") and torch.cuda.is_available():
+        return torch.device("cuda")
+    if accelerator in ("auto", "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def plot_rollout(tracer, time, true_vals, pred_vals, species, path):
@@ -105,12 +113,13 @@ def main(
     test_dir=None,
     species=None,
     num_tracers=10,
+    accelerator="auto",
 ):
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     test_csv = resolve_test_csv(data_dir=data_dir, test_csv=test_dir)
     model = MLP.load_from_checkpoint(str(Path(model_checkpoint).expanduser().resolve()))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(accelerator)
     model.to(device)
 
     data, phys_cols, abundance_cols = load_dataset(test_csv)
@@ -152,6 +161,8 @@ def main(
         "avg_tracer_mse": float(np.mean([row["mse"] for row in tracer_errors])),
         "max_tracer_mse": float(max(row["mse"] for row in tracer_errors)),
         "plot_species": selected_species,
+        "prediction_mode": model.prediction_mode,
+        "device": str(device),
     }
     pd.DataFrame(tracer_errors).to_csv(output_dir / "tracer_errors.csv", index=False)
     pd.DataFrame({"species": abundance_cols, "mse": species_mse}).to_csv(
@@ -192,6 +203,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", "--output_dir", type=Path, default=config.TEST_OUTPUT_DIR)
     parser.add_argument("--species", nargs="+", default=DEFAULT_SPECIES)
     parser.add_argument("--num-tracers", "--num_tracers", type=int, default=10)
+    parser.add_argument("--accelerator", type=str, default="auto")
     args = parser.parse_args()
     main(
         model_checkpoint=args.model_checkpoint,
@@ -200,4 +212,5 @@ if __name__ == "__main__":
         test_dir=args.test_dir,
         species=args.species,
         num_tracers=args.num_tracers,
+        accelerator=args.accelerator,
     )

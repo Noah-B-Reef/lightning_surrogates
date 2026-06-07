@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -124,11 +125,27 @@ def train_final_model(
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
     rollout_steps=config.ROLLOUT_STEPS,
+    prediction_mode="direct",
+    early_stopping=True,
+    batch_size=None,
+    hidden_layers=None,
+    hidden_units=None,
+    use_layer_norm=True,
+    train_sample_stride=1,
+    val_fraction=1.0,
+    val_every_n_epochs=1,
+    val_rollout_steps=None,
+    compact_batches=False,
+    init_checkpoint=None,
+    enable_logger=True,
 ):
     split_dir = config.resolve_split_dir(split_dir)
     results_dir = Path(results_dir).expanduser().resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     num_epochs = int(num_epochs or config.EPOCHS)
+    batch_size = int(batch_size or best_config["batch_size"])
+    hidden_layers = int(hidden_layers or best_config["num_hidden_layers"])
+    hidden_units = int(hidden_units or best_config["num_neurons_per_hidden_layer"])
 
     log_dir = results_dir / "lightning_logs" / "mlp_grav_collapse"
     if log_dir.exists():
@@ -136,20 +153,31 @@ def train_final_model(
 
     data = GravCollapseDataModule(
         data_dir=str(split_dir),
-        batch_size=int(best_config["batch_size"]),
+        batch_size=batch_size,
         num_workers=int(num_workers),
         max_rollout_steps=int(rollout_steps),
+        val_rollout_steps=val_rollout_steps,
+        train_sample_stride=train_sample_stride,
+        val_fraction=val_fraction,
+        compact_batches=compact_batches,
     )
     data.setup("fit")
     model_config = {
         "num_inputs": data.num_features,
         "output_size": data.num_targets,
-        "num_hidden_layers": int(best_config["num_hidden_layers"]),
-        "num_neurons_per_hidden_layer": int(best_config["num_neurons_per_hidden_layer"]),
+        "num_hidden_layers": hidden_layers,
+        "num_neurons_per_hidden_layer": hidden_units,
         "learning_rate": float(best_config["learning_rate"]),
+        "prediction_mode": prediction_mode,
+        "use_layer_norm": bool(use_layer_norm),
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
+    if init_checkpoint is not None:
+        checkpoint_path = Path(init_checkpoint).expanduser().resolve()
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        model.load_state_dict(checkpoint["state_dict"], strict=True)
+        print(f"Initialized model weights from {checkpoint_path}", flush=True)
     train_batches = len(data.train_dataloader())
     val_batches = len(data.val_dataloader())
     num_parameters = sum(param.numel() for param in model.parameters())
@@ -157,19 +185,23 @@ def train_final_model(
     print(
         "Starting final training: "
         f"epochs={num_epochs}, "
-        f"batch_size={best_config['batch_size']}, "
+        f"batch_size={batch_size}, "
         f"learning_rate={best_config['learning_rate']:.6g}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}, "
         f"train_batches={train_batches:,}, "
         f"val_batches={val_batches:,}, "
-        f"parameters={num_parameters:,}",
+        f"parameters={num_parameters:,}, "
+        f"prediction_mode={prediction_mode}, "
+        f"train_stride={train_sample_stride}, "
+        f"val_fraction={val_fraction:.3g}, "
+        f"val_rollout_steps={data.val_rollout_steps}, "
+        f"compact_batches={compact_batches}",
         flush=True,
     )
 
     metrics = MetricsHistoryLogger()
     callbacks = [
-        RelativeImprovementEarlyStopping(monitor="val_loss", patience=8, mode="min"),
         EpochProgressPrinter(
             prefix="[Final training]",
             metric_names=("train_loss", "val_loss", "train_mse", "val_mse"),
@@ -183,6 +215,11 @@ def train_final_model(
         ),
         metrics,
     ]
+    if early_stopping:
+        callbacks.insert(
+            0,
+            RelativeImprovementEarlyStopping(monitor="val_loss", patience=8, mode="min"),
+        )
     if save_epoch_checkpoints:
         callbacks.append(
             ModelCheckpoint(
@@ -199,17 +236,25 @@ def train_final_model(
         devices=parse_devices(devices),
         precision=precision,
         callbacks=callbacks,
-        logger=TensorBoardLogger(
-            save_dir=str(results_dir / "lightning_logs"),
-            name="mlp_grav_collapse",
+        logger=(
+            TensorBoardLogger(
+                save_dir=str(results_dir / "lightning_logs"),
+                name="mlp_grav_collapse",
+            )
+            if enable_logger
+            else False
         ),
         gradient_clip_val=1.0,
         log_every_n_steps=10,
+        check_val_every_n_epoch=max(1, int(val_every_n_epochs)),
     )
     trainer.fit(model, datamodule=data)
 
     final_checkpoint = results_dir / checkpoint_name
-    best_checkpoint = callbacks[2].best_model_path
+    checkpoint_callback = next(
+        callback for callback in callbacks if isinstance(callback, ModelCheckpoint)
+    )
+    best_checkpoint = checkpoint_callback.best_model_path
     if best_checkpoint:
         shutil.copy2(best_checkpoint, final_checkpoint)
     else:
@@ -245,6 +290,19 @@ def main(
     num_workers=config.NUM_WORKERS,
     save_epoch_checkpoints=True,
     rollout_steps=config.ROLLOUT_STEPS,
+    prediction_mode="direct",
+    early_stopping=True,
+    batch_size=None,
+    hidden_layers=None,
+    hidden_units=None,
+    use_layer_norm=True,
+    train_sample_stride=1,
+    val_fraction=1.0,
+    val_every_n_epochs=1,
+    val_rollout_steps=None,
+    compact_batches=False,
+    init_checkpoint=None,
+    enable_logger=True,
 ):
     split_dir = data_dir or dataset_path
     if use_defaults:
@@ -265,6 +323,19 @@ def main(
         precision=precision,
         num_workers=num_workers,
         rollout_steps=rollout_steps,
+        prediction_mode=prediction_mode,
+        early_stopping=early_stopping,
+        batch_size=batch_size,
+        hidden_layers=hidden_layers,
+        hidden_units=hidden_units,
+        use_layer_norm=use_layer_norm,
+        train_sample_stride=train_sample_stride,
+        val_fraction=val_fraction,
+        val_every_n_epochs=val_every_n_epochs,
+        val_rollout_steps=val_rollout_steps,
+        compact_batches=compact_batches,
+        init_checkpoint=init_checkpoint,
+        enable_logger=enable_logger,
     )
 
 
@@ -282,6 +353,24 @@ if __name__ == "__main__":
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--hidden-layers", type=int, default=None)
+    parser.add_argument("--hidden-units", type=int, default=None)
+    parser.add_argument("--no-layer-norm", action="store_true")
+    parser.add_argument("--train-sample-stride", type=int, default=1)
+    parser.add_argument("--val-fraction", type=float, default=1.0)
+    parser.add_argument("--val-every-n-epochs", type=int, default=1)
+    parser.add_argument("--val-rollout-steps", type=int, default=None)
+    parser.add_argument("--compact-batches", action="store_true")
+    parser.add_argument("--init-checkpoint", type=Path, default=None)
+    parser.add_argument("--no-logger", action="store_true")
+    parser.add_argument(
+        "--prediction-mode",
+        choices=("direct", "delta"),
+        default="direct",
+        help="direct predicts x_{t+1}; delta predicts dx and advances x_{t+1}=x_t+dx.",
+    )
+    parser.add_argument("--no-early-stopping", action="store_true")
     parser.add_argument("--no-epoch-checkpoints", action="store_true")
     args = parser.parse_args()
     main(
@@ -297,5 +386,18 @@ if __name__ == "__main__":
         precision=args.precision,
         num_workers=args.num_workers,
         rollout_steps=args.rollout_steps,
+        prediction_mode=args.prediction_mode,
+        early_stopping=not args.no_early_stopping,
+        batch_size=args.batch_size,
+        hidden_layers=args.hidden_layers,
+        hidden_units=args.hidden_units,
+        use_layer_norm=not args.no_layer_norm,
+        train_sample_stride=args.train_sample_stride,
+        val_fraction=args.val_fraction,
+        val_every_n_epochs=args.val_every_n_epochs,
+        val_rollout_steps=args.val_rollout_steps,
+        compact_batches=args.compact_batches,
+        init_checkpoint=args.init_checkpoint,
+        enable_logger=not args.no_logger,
         save_epoch_checkpoints=not args.no_epoch_checkpoints,
     )

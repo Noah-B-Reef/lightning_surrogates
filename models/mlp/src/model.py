@@ -14,8 +14,12 @@ class MLP(pl.LightningModule):
         hidden_layers = int(config["num_hidden_layers"])
         hidden_units = int(config["num_neurons_per_hidden_layer"])
         output_size = int(config["output_size"])
+        self.use_layer_norm = bool(config.get("use_layer_norm", True))
         self.learning_rate = float(config.get("learning_rate", 1e-3))
         self.rollout_steps = int(config.get("rollout_steps", 1))
+        self.prediction_mode = config.get("prediction_mode", "direct")
+        if self.prediction_mode not in {"direct", "delta"}:
+            raise ValueError("prediction_mode must be 'direct' or 'delta'")
 
         # Physical-parameter normalization. Stats are computed on the training
         # split (see data.GravCollapseDataModule.phys_norm_config) and stored
@@ -36,19 +40,15 @@ class MLP(pl.LightningModule):
             "phys_std", torch.tensor(phys_std, dtype=torch.float32)
         )
 
-        layers = [
-            nn.Linear(num_inputs, hidden_units),
-            nn.LayerNorm(hidden_units),
-            nn.ReLU(),
-        ]
+        layers = [nn.Linear(num_inputs, hidden_units)]
+        if self.use_layer_norm:
+            layers.append(nn.LayerNorm(hidden_units))
+        layers.append(nn.ReLU())
         for _ in range(max(0, hidden_layers - 1)):
-            layers.extend(
-                [
-                    nn.Linear(hidden_units, hidden_units),
-                    nn.LayerNorm(hidden_units),
-                    nn.ReLU(),
-                ]
-            )
+            layers.append(nn.Linear(hidden_units, hidden_units))
+            if self.use_layer_norm:
+                layers.append(nn.LayerNorm(hidden_units))
+            layers.append(nn.ReLU())
         self.network = nn.Sequential(*layers)
         self.output_proj = nn.Linear(hidden_units, output_size)
 
@@ -74,13 +74,21 @@ class MLP(pl.LightningModule):
         x = self._normalize_phys(x)
         return self.output_proj(self.network(x))
 
+    def predict_next(self, x, current=None):
+        raw = self(x)
+        if self.prediction_mode == "direct":
+            return raw
+        if current is None:
+            current = x[:, self.num_phys:]
+        return current + raw
+
     def _rollout(self, initial, phys_seq):
         current = initial[:, self.num_phys:]
         preds = []
         steps = phys_seq.shape[1]
         for step in range(steps):
             x = torch.cat([phys_seq[:, step, :], current], dim=1)
-            current = self(x)
+            current = self.predict_next(x, current)
             preds.append(current)
         return torch.stack(preds, dim=1)
 
@@ -93,7 +101,7 @@ class MLP(pl.LightningModule):
     def _step(self, batch, stage):
         if len(batch) == 2:
             initial, targets = batch
-            preds = self(initial)
+            preds = self.predict_next(initial)
             loss = F.smooth_l1_loss(preds, targets)
             metric = getattr(self, f"{stage}_mse")
             metric(preds, targets)
