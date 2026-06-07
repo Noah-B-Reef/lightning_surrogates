@@ -1,55 +1,43 @@
 {
   "branch": "training-speed-optimizations",
   "dataset": "/Users/nreef/research/datasets/best_sampler",
-  "accelerator": "mps",
-  "prediction_mode": "direct",
-  "rollout_steps": 5,
-  "baseline": {
-    "architecture": "3x256 with LayerNorm",
-    "batch_size": 312,
-    "train_sample_stride": 1,
-    "validation_fraction": 1.0,
-    "validation_rollout_steps": 5,
-    "validation_every_n_epochs": 1,
-    "measured_epochs": 1,
-    "training_seconds": 147.36,
-    "seconds_per_epoch": 147.36,
-    "reference_100_epoch_test_mse": 0.01109827309846878,
-    "reference_100_epoch_training_seconds": 17820.92
+  "dataset_scope": {
+    "train_samples_after_stride": 532800,
+    "validation_samples_after_fraction": 70800,
+    "test_tracers": 1200,
+    "note": "All tracers are retained. Training uses every second overlapping window because train_sample_stride is 2."
   },
-  "staged_fast": {
+  "configuration": {
     "architecture": "3x256 with LayerNorm",
-    "initialized_from": "full_direct_rollout1_bs312",
+    "parameters": 305741,
+    "initialized_from": "models/mlp/results/compare/full_direct_rollout1_bs312/mlp_grav_collapse.ckpt",
+    "prediction_mode": "direct",
+    "training_rollout_steps": 5,
     "batch_size": 1024,
     "train_sample_stride": 2,
     "validation_fraction": 0.2,
     "validation_rollout_steps": 1,
     "validation_every_n_epochs": 5,
     "compact_batches": true,
-    "measured_epochs": 50,
-    "training_seconds": 549.08,
-    "seconds_per_epoch": 10.9816,
-    "speedup_vs_measured_baseline_epoch": 13.4188,
-    "projected_100_epoch_minutes": 18.3027,
-    "full_test_rollout_mse": 0.027542078867554665
+    "accelerator": "mps",
+    "epochs": 100
   },
-  "small_fast": {
-    "architecture": "2x128 without LayerNorm",
-    "batch_size": 1024,
-    "train_sample_stride": 2,
-    "validation_fraction": 0.2,
-    "validation_rollout_steps": 1,
-    "validation_every_n_epochs": 5,
-    "compact_batches": true,
-    "measured_epochs": 50,
-    "training_seconds": 456.86,
-    "seconds_per_epoch": 9.1372,
-    "speedup_vs_measured_baseline_epoch": 16.1275,
-    "projected_100_epoch_minutes": 15.2287,
-    "full_test_rollout_mse": 3.6970818042755127
+  "training": {
+    "training_seconds": 1084.24,
+    "training_minutes": 18.0707,
+    "seconds_per_epoch": 10.8424,
+    "best_validation_epoch_zero_based": 34,
+    "best_validation_epoch_human": 35,
+    "best_validation_loss": 0.000893465,
+    "checkpoint": "models/mlp/results/speed_bench/full_staged_fast_100epochs/mlp_grav_collapse.ckpt",
+    "note": "The standard output checkpoint is a copy of the best-validation checkpoint selected after the complete 100-epoch run."
   },
-  "recommendation": {
-    "profile": "staged_fast",
-    "reason": "It preserves the successful architecture and gives the best measured speed-quality tradeoff. The small architecture is faster but underfits badly."
+  "full_autoregressive_test": {
+    "overall_mse": 0.04567982628941536,
+    "average_tracer_mse": 0.04567989552238335,
+    "minimum_tracer_mse": 0.006761573255062103,
+    "maximum_tracer_mse": 1.5363438129425049,
+    "test_seconds": 328.19,
+    "device": "mps"
   }
 }
