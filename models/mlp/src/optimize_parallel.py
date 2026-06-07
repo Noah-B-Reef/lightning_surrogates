@@ -170,6 +170,20 @@ def main():
     parser.add_argument("--storage", type=str, default=None)
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
+    parser.add_argument("--hidden-layers", type=int, default=config.NUM_LAYERS)
+    parser.add_argument("--hidden-units", type=int, default=config.HIDDEN_UNITS)
+    parser.add_argument("--batch-size", type=int, default=config.BATCH_SIZE)
+    parser.add_argument("--no-layer-norm", dest="use_layer_norm", action="store_false")
+    parser.set_defaults(use_layer_norm=True)
+    parser.add_argument("--prediction-mode", choices=("direct", "delta"), default="direct")
+    parser.add_argument("--train-sample-stride", type=int, default=1)
+    parser.add_argument("--val-fraction", type=float, default=1.0)
+    parser.add_argument("--val-every-n-epochs", type=int, default=1)
+    parser.add_argument("--val-rollout-steps", type=int, default=None)
+    parser.add_argument("--compact-batches", action="store_true")
+    parser.add_argument("--init-checkpoint", type=Path, default=None)
+    parser.add_argument("--no-logger", dest="enable_logger", action="store_false")
+    parser.set_defaults(enable_logger=True)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
@@ -197,6 +211,12 @@ def main():
     configured_storage = config.OPTUNA_PARALLEL_STORAGE or None
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
+    if args.init_checkpoint is not None:
+        args.init_checkpoint = args.init_checkpoint.expanduser().resolve()
+        if not args.init_checkpoint.is_file():
+            raise FileNotFoundError(
+                f"Initialization checkpoint not found: {args.init_checkpoint}"
+            )
     storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
 
     rank, world_size, node_id = parse_rank_context()

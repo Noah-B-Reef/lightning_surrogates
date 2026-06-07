@@ -37,24 +37,15 @@ def parse_devices(devices):
 def objective(trial, args, split_dir):
     search = config.OPTUNA_SEARCH_SPACE
     params = {
-        "num_hidden_layers": trial.suggest_int(
-            "num_hidden_layers", search["num_layers"]["low"], search["num_layers"]["high"]
-        ),
-        "num_neurons_per_hidden_layer": trial.suggest_int(
-            "num_neurons_per_hidden_layer",
-            search["hidden_units"]["low"],
-            search["hidden_units"]["high"],
-            step=search["hidden_units"]["step"],
-        ),
+        "num_hidden_layers": args.hidden_layers,
+        "num_neurons_per_hidden_layer": args.hidden_units,
         "learning_rate": trial.suggest_float(
             "learning_rate",
             search["learning_rate"]["low"],
             search["learning_rate"]["high"],
             log=search["learning_rate"]["log"],
         ),
-        "batch_size": trial.suggest_categorical(
-            "batch_size", search["batch_size"]["choices"]
-        ),
+        "batch_size": args.batch_size,
     }
 
     data = GravCollapseDataModule(
@@ -62,6 +53,10 @@ def objective(trial, args, split_dir):
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
         max_rollout_steps=args.rollout_steps,
+        val_rollout_steps=args.val_rollout_steps,
+        train_sample_stride=args.train_sample_stride,
+        val_fraction=args.val_fraction,
+        compact_batches=args.compact_batches,
     )
     data.setup("fit")
     model_config = {
@@ -70,9 +65,14 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
+        "prediction_mode": args.prediction_mode,
+        "use_layer_norm": args.use_layer_norm,
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
+    if args.init_checkpoint is not None:
+        checkpoint = torch.load(args.init_checkpoint, map_location="cpu", weights_only=False)
+        model.load_state_dict(checkpoint["state_dict"], strict=True)
     train_batches = len(data.train_dataloader())
     val_batches = len(data.val_dataloader())
     num_parameters = sum(param.numel() for param in model.parameters())
@@ -87,6 +87,13 @@ def objective(trial, args, split_dir):
         f"parameters={num_parameters:,}; "
         f"training: batch_size={params['batch_size']}, "
         f"learning_rate={params['learning_rate']:.6g}, "
+        f"rollout_steps={args.rollout_steps}, "
+        f"train_stride={args.train_sample_stride}, "
+        f"val_fraction={args.val_fraction:.3g}, "
+        f"val_rollout_steps={data.val_rollout_steps}, "
+        f"val_every_n_epochs={args.val_every_n_epochs}, "
+        f"compact_batches={args.compact_batches}, "
+        f"init_checkpoint={args.init_checkpoint or 'none'}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}, "
         f"train_batches={train_batches:,}, "
@@ -112,14 +119,19 @@ def objective(trial, args, split_dir):
                 verbose=False,
             )
         ],
-        logger=pl.loggers.TensorBoardLogger(
-            save_dir=str(args.results_dir / "lightning_logs"),
-            name="optuna",
-            version=f"trial_{trial.number}",
+        logger=(
+            pl.loggers.TensorBoardLogger(
+                save_dir=str(args.results_dir / "lightning_logs"),
+                name="optuna",
+                version=f"trial_{trial.number}",
+            )
+            if args.enable_logger
+            else False
         ),
         enable_checkpointing=False,
         enable_model_summary=False,
         log_every_n_steps=10,
+        check_val_every_n_epoch=max(1, args.val_every_n_epochs),
     )
     trainer.fit(model, datamodule=data)
     val_loss = trainer.callback_metrics.get("val_loss")
@@ -289,6 +301,20 @@ def main():
     )
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
     parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
+    parser.add_argument("--hidden-layers", type=int, default=config.NUM_LAYERS)
+    parser.add_argument("--hidden-units", type=int, default=config.HIDDEN_UNITS)
+    parser.add_argument("--batch-size", type=int, default=config.BATCH_SIZE)
+    parser.add_argument("--no-layer-norm", dest="use_layer_norm", action="store_false")
+    parser.set_defaults(use_layer_norm=True)
+    parser.add_argument("--prediction-mode", choices=("direct", "delta"), default="direct")
+    parser.add_argument("--train-sample-stride", type=int, default=1)
+    parser.add_argument("--val-fraction", type=float, default=1.0)
+    parser.add_argument("--val-every-n-epochs", type=int, default=1)
+    parser.add_argument("--val-rollout-steps", type=int, default=None)
+    parser.add_argument("--compact-batches", action="store_true")
+    parser.add_argument("--init-checkpoint", type=Path, default=None)
+    parser.add_argument("--no-logger", dest="enable_logger", action="store_false")
+    parser.set_defaults(enable_logger=True)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
@@ -304,6 +330,12 @@ def main():
     split_dir = config.resolve_split_dir(dataset_path)
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
+    if args.init_checkpoint is not None:
+        args.init_checkpoint = args.init_checkpoint.expanduser().resolve()
+        if not args.init_checkpoint.is_file():
+            raise FileNotFoundError(
+                f"Initialization checkpoint not found: {args.init_checkpoint}"
+            )
 
     configured_storage = None if config.OPTUNA_STORAGE == "auto" else config.OPTUNA_STORAGE
     storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"

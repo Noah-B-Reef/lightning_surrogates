@@ -43,6 +43,17 @@ python "${SCRIPT_DIR}/src/optimize.py" \
     --num-trials "${N_TRIALS}" \
     --tune-epochs "${TUNE_EPOCHS}" \
     --rollout-steps "${MODEL_ROLLOUT_STEPS}" \
+    --hidden-layers "${MODEL_NUM_LAYERS}" \
+    --hidden-units "${MODEL_HIDDEN_UNITS}" \
+    --batch-size "${MODEL_BATCH_SIZE}" \
+    --prediction-mode "${MODEL_PREDICTION_MODE}" \
+    --train-sample-stride "${MODEL_TRAIN_SAMPLE_STRIDE}" \
+    --val-fraction "${MODEL_VAL_FRACTION}" \
+    --val-every-n-epochs "${MODEL_VAL_EVERY_N_EPOCHS}" \
+    --val-rollout-steps "${MODEL_VAL_ROLLOUT_STEPS}" \
+    --compact-batches \
+    --init-checkpoint "${MODEL_INIT_CHECKPOINT}" \
+    --no-logger \
     --accelerator "${ACCELERATOR}" \
     --devices "${DEVICES}" \
     --precision "${PRECISION}" \
@@ -57,6 +68,17 @@ python "${SCRIPT_DIR}/src/train.py" \
     --checkpoint "${CHECKPOINT_NAME}" \
     --epochs "${TRAIN_EPOCHS}" \
     --rollout-steps "${MODEL_ROLLOUT_STEPS}" \
+    --batch-size "${MODEL_BATCH_SIZE}" \
+    --hidden-layers "${MODEL_NUM_LAYERS}" \
+    --hidden-units "${MODEL_HIDDEN_UNITS}" \
+    --prediction-mode "${MODEL_PREDICTION_MODE}" \
+    --train-sample-stride "${MODEL_TRAIN_SAMPLE_STRIDE}" \
+    --val-fraction "${MODEL_VAL_FRACTION}" \
+    --val-every-n-epochs "${MODEL_VAL_EVERY_N_EPOCHS}" \
+    --val-rollout-steps "${MODEL_VAL_ROLLOUT_STEPS}" \
+    --compact-batches \
+    --init-checkpoint "${MODEL_INIT_CHECKPOINT}" \
+    --no-logger \
     --accelerator "${ACCELERATOR}" \
     --devices "${DEVICES}" \
     --precision "${PRECISION}" \
