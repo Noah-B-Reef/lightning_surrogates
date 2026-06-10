@@ -8,33 +8,22 @@ import pandas as pd
 import torch
 
 import settings as config
-from data import PHYS_COLS
+from data import PHYS_COLS, EXCLUDED_COLS, load_split_dataframe
 from model import MLP
 
 
 DEFAULT_SPECIES = ["H", "H2", "O", "C", "N", "CL", "E_minus", "CO", "MG", "#C", "H2O", "SI"]
 
 
-def resolve_test_csv(data_dir=None, test_csv=None):
-    if test_csv is not None:
-        path = Path(test_csv).expanduser().resolve()
-        if not path.is_file():
-            raise FileNotFoundError(f"Test CSV not found: {path}")
-        return path
-    # No explicit test CSV: resolve the split directory (defaulting to the
-    # best-sampler split) and use its test.csv.
-    return config.resolve_split_dir(data_dir, required=("test.csv",)) / "test.csv"
-
-
-def load_dataset(csv_path):
-    df = pd.read_csv(csv_path)
+def load_dataset(split_dir):
+    df = load_split_dataframe(split_dir, "test")
     df = df.drop(columns=["dstep"], errors="ignore")
     df = df.sort_values(["Tracer", "Time"]).reset_index(drop=True)
     phys_cols = [col for col in PHYS_COLS if col in df.columns]
     abundance_cols = [
         col
         for col in df.columns
-        if col not in ("Tracer", "Time", "dstep", "BULK", "SURFACE") and col not in phys_cols
+        if col not in EXCLUDED_COLS and col not in phys_cols
     ]
     return df, phys_cols, abundance_cols
 
@@ -42,7 +31,7 @@ def load_dataset(csv_path):
 def aliases(species):
     values = [species]
     if species == "E_minus":
-        values.extend(["E-", "E"] )
+        values.extend(["E-", "E"])
     if species.startswith("#"):
         values.append("@" + species[1:])
     return values
@@ -71,7 +60,7 @@ def rollout_tracer(model, tracer_df, phys_cols, abundance_cols, device):
         for step in range(len(tracer_df) - 1):
             phys_t = torch.tensor(phys[step], dtype=torch.float32, device=device)
             x = torch.cat([phys_t, current]).unsqueeze(0)
-            current = model.predict_next(x, current.unsqueeze(0)).squeeze(0)
+            current = model(x).squeeze(0)
             predictions.append(current.detach().cpu().numpy())
     return np.asarray(predictions), true_log
 
@@ -107,22 +96,28 @@ def plot_rollout(tracer, time, true_vals, pred_vals, species, path):
 
 
 def main(
-    model_checkpoint,
+    model_checkpoint=None,
     data_dir=None,
-    output_dir=config.TEST_OUTPUT_DIR,
-    test_dir=None,
+    output_dir=None,
     species=None,
-    num_tracers=10,
+    num_tracers=config.TEST_NUM_TRACERS,
     accelerator="auto",
 ):
+    split_dir = config.resolve_split_dir(data_dir, required=("test",))
+    # Experiment results live in results/{dataset_name}/{architecture}.
+    experiment_dir = config.experiment_dir(split_dir)
+    if model_checkpoint is None:
+        model_checkpoint = experiment_dir / config.CHECKPOINT_NAME
+    if output_dir is None:
+        output_dir = experiment_dir / "test_results"
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    test_csv = resolve_test_csv(data_dir=data_dir, test_csv=test_dir)
+
     model = MLP.load_from_checkpoint(str(Path(model_checkpoint).expanduser().resolve()))
     device = resolve_device(accelerator)
     model.to(device)
 
-    data, phys_cols, abundance_cols = load_dataset(test_csv)
+    data, phys_cols, abundance_cols = load_dataset(split_dir)
     selected_species = resolve_species(species or DEFAULT_SPECIES, abundance_cols)
     selected_idx = [abundance_cols.index(name) for name in selected_species]
     predictions = []
@@ -154,14 +149,14 @@ def main(
     all_errors = np.concatenate(all_errors, axis=0)
     species_mse = np.mean(all_errors, axis=0)
     summary = {
-        "test_csv": str(test_csv),
+        "split_dir": str(split_dir),
+        "model_checkpoint": str(model_checkpoint),
         "num_tracers": len(tracer_errors),
         "overall_mse": float(np.mean(all_errors)),
         "min_tracer_mse": float(min(row["mse"] for row in tracer_errors)),
         "avg_tracer_mse": float(np.mean([row["mse"] for row in tracer_errors])),
         "max_tracer_mse": float(max(row["mse"] for row in tracer_errors)),
         "plot_species": selected_species,
-        "prediction_mode": model.prediction_mode,
         "device": str(device),
     }
     pd.DataFrame(tracer_errors).to_csv(output_dir / "tracer_errors.csv", index=False)
@@ -196,20 +191,28 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate an MLP checkpoint with autoregressive rollout.")
-    parser.add_argument("dataset_path", nargs="?", default=None, help="Split directory containing test.csv.")
+    parser.add_argument("dataset_path", nargs="?", default=None, help="Split directory containing the test split.")
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
-    parser.add_argument("--model-checkpoint", "--model_checkpoint", type=Path, default=config.TEST_MODEL_CHECKPOINT)
-    parser.add_argument("--test-dir", "--test_dir", "--test-csv", type=Path, default=None)
-    parser.add_argument("--output-dir", "--output_dir", type=Path, default=config.TEST_OUTPUT_DIR)
+    parser.add_argument(
+        "--model-checkpoint",
+        type=Path,
+        default=None,
+        help="Defaults to results/{dataset_name}/mlp/" + config.CHECKPOINT_NAME,
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Defaults to results/{dataset_name}/mlp/test_results.",
+    )
     parser.add_argument("--species", nargs="+", default=DEFAULT_SPECIES)
-    parser.add_argument("--num-tracers", "--num_tracers", type=int, default=10)
+    parser.add_argument("--num-tracers", type=int, default=config.TEST_NUM_TRACERS)
     parser.add_argument("--accelerator", type=str, default="auto")
     args = parser.parse_args()
     main(
         model_checkpoint=args.model_checkpoint,
         data_dir=args.data_dir or args.dataset_path,
         output_dir=args.output_dir,
-        test_dir=args.test_dir,
         species=args.species,
         num_tracers=args.num_tracers,
         accelerator=args.accelerator,

@@ -1,6 +1,0 @@
-config:
-  learning_rate: 0.0004815045271143749
-  num_hidden_layers: 5
-  num_inputs: 339
-  num_neurons_per_hidden_layer: 128
-  output_size: 333

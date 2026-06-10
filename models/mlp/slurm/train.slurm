@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A AST24021
 #SBATCH --job-name=gc_train
-#SBATCH --output=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/results/output/train_%j.out
-#SBATCH --error=/work/10252/nbr525/vista/lightning_surrogates/models/mlp/results/error/train_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,39 +11,29 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
 
-if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
-    if [ -f "${SLURM_SUBMIT_DIR}/slurm/common.sh" ]; then
-        source "${SLURM_SUBMIT_DIR}/slurm/common.sh"
-    else
-        source "${SLURM_SUBMIT_DIR}/common.sh"
-    fi
+# All paths and pipeline arguments come from the repo config (config.sh),
+# loaded by common.sh. Submit from models/mlp: sbatch slurm/<name>.slurm
+if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/slurm/common.sh" ]; then
+    source "${SLURM_SUBMIT_DIR}/slurm/common.sh"
 else
     source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 fi
 trap 'status=$?; echo "FAILED at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
 
 cd "${SCRIPT_DIR}"
+mkdir -p logs
 validate_split_dir
 print_config_summary
 activate_conda
 
 python "${SCRIPT_DIR}/src/train.py" \
-    "${DATA_DIR}" \
-    --results-dir "${RESULTS_DIR}" \
-    --config-file "${TRAIN_CONFIG_FILE}" \
+    "${LS_DATA_DIR}" \
+    --results-dir "${EXPERIMENT_DIR}" \
+    --config-file "${OPTUNA_RESULTS_DIR}/best_params.json" \
     --checkpoint "${CHECKPOINT_NAME}" \
     --epochs "${TRAIN_EPOCHS}" \
-    --rollout-steps "${MODEL_ROLLOUT_STEPS}" \
-    --batch-size "${MODEL_BATCH_SIZE}" \
-    --hidden-layers "${MODEL_NUM_LAYERS}" \
-    --hidden-units "${MODEL_HIDDEN_UNITS}" \
-    --prediction-mode "${MODEL_PREDICTION_MODE}" \
-    --train-sample-stride "${MODEL_TRAIN_SAMPLE_STRIDE}" \
-    --val-fraction "${MODEL_VAL_FRACTION}" \
-    --val-every-n-epochs "${MODEL_VAL_EVERY_N_EPOCHS}" \
-    --val-rollout-steps "${MODEL_VAL_ROLLOUT_STEPS}" \
-    --compact-batches \
-    --init-checkpoint "${MODEL_INIT_CHECKPOINT}" \
+    --early-stopping-patience "${EARLY_STOPPING_PATIENCE}" \
+    --early-stopping-min-relative-improvement "${EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT}" \
     --no-logger \
     --accelerator "${ACCELERATOR}" \
     --devices "${DEVICES}" \

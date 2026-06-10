@@ -4,20 +4,26 @@ set -Eeuo pipefail
 
 SLURM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MLP_DIR="$(cd "${SLURM_DIR}/.." && pwd)"
-MLP_SLURM_CONFIG="${MLP_SLURM_CONFIG:-${MLP_CONFIG:-${MLP_DIR}/config.sh}}"
-export MLP_SLURM_CONFIG
+REPO_DIR="$(cd "${MLP_DIR}/../.." && pwd)"
 
-if [ ! -f "${MLP_SLURM_CONFIG}" ]; then
-    echo "Missing Slurm config: ${MLP_SLURM_CONFIG}" >&2
+# Single shared config at the repository root (override with LS_CONFIG).
+LS_CONFIG="${LS_CONFIG:-${REPO_DIR}/config.sh}"
+export LS_CONFIG
+
+if [ ! -f "${LS_CONFIG}" ]; then
+    echo "Missing config: ${LS_CONFIG}" >&2
     exit 2
 fi
 
-source "${MLP_SLURM_CONFIG}"
+source "${LS_CONFIG}"
 
-OPTUNA_RESULTS_DIR="${OPTUNA_RESULTS_DIR:-${RESULTS_DIR}/optimization}"
-OPTUNA_PARALLEL_RESULTS_DIR="${OPTUNA_PARALLEL_RESULTS_DIR:-${RESULTS_DIR}/optimization_parallel}"
+SCRIPT_DIR="${MLP_DIR}"
+
+# results/{dataset_name}/{model architecture}
+EXPERIMENT_DIR="${RESULTS_ROOT}/${SAMPLING_PROCEDURE}/mlp"
+OPTUNA_RESULTS_DIR="${EXPERIMENT_DIR}/optimization"
+export EXPERIMENT_DIR
 export OPTUNA_RESULTS_DIR
-export OPTUNA_PARALLEL_RESULTS_DIR
 
 if [ "${CONFIG_NUM_WORKERS:-auto}" = "auto" ]; then
     NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-0}}"
@@ -25,9 +31,6 @@ else
     NUM_WORKERS="${NUM_WORKERS:-${CONFIG_NUM_WORKERS}}"
 fi
 
-export MLP_DATASETS_DIR="${DATASETS_DIR}"
-export MLP_DATA_DIR="${DATA_DIR}"
-export MLP_RESULTS_DIR="${RESULTS_DIR}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 activate_conda() {
@@ -50,42 +53,34 @@ activate_conda() {
 }
 
 validate_split_dir() {
-    for split_file in train.csv val.csv test.csv; do
-        if [ ! -f "${DATA_DIR}/${split_file}" ]; then
-            echo "Missing ${DATA_DIR}/${split_file}"
-            echo "DATA_DIR must point to a split directory containing train.csv, val.csv, and test.csv."
+    for split_name in train val test; do
+        if [ ! -f "${LS_DATA_DIR}/${split_name}.${STORAGE_FORMAT}" ]; then
+            echo "Missing ${LS_DATA_DIR}/${split_name}.${STORAGE_FORMAT}"
+            echo "LS_DATA_DIR must point to a split directory containing train/val/test .${STORAGE_FORMAT} files."
             exit 2
         fi
     done
 }
 
 print_config_summary() {
-    echo "MLP_SLURM_CONFIG=${MLP_SLURM_CONFIG}"
+    echo "LS_CONFIG=${LS_CONFIG}"
     echo "SCRIPT_DIR=${SCRIPT_DIR}"
-    echo "DATA_DIR=${DATA_DIR}"
-    echo "RESULTS_DIR=${RESULTS_DIR}"
+    echo "SAMPLING_PROCEDURE=${SAMPLING_PROCEDURE}"
+    echo "STORAGE_FORMAT=${STORAGE_FORMAT}"
+    echo "LS_DATA_DIR=${LS_DATA_DIR}"
+    echo "RESULTS_ROOT=${RESULTS_ROOT}"
+    echo "EXPERIMENT_DIR=${EXPERIMENT_DIR}"
     echo "OPTUNA_RESULTS_DIR=${OPTUNA_RESULTS_DIR}"
-    echo "OPTUNA_PARALLEL_RESULTS_DIR=${OPTUNA_PARALLEL_RESULTS_DIR}"
     echo "JOURNAL_MODE=${JOURNAL_MODE}"
-    echo "TRAIN_CONFIG_FILE=${TRAIN_CONFIG_FILE}"
-    echo "TEST_MODEL_CHECKPOINT=${TEST_MODEL_CHECKPOINT}"
-    echo "TEST_OUTPUT_DIR=${TEST_OUTPUT_DIR}"
     echo "CONDA_ENV=${CONDA_ENV}"
     echo "ACCELERATOR=${ACCELERATOR}"
     echo "DEVICES=${DEVICES}"
     echo "PRECISION=${PRECISION}"
     echo "NUM_WORKERS=${NUM_WORKERS}"
-    echo "MODEL_ROLLOUT_STEPS=${MODEL_ROLLOUT_STEPS}"
     echo "MODEL_NUM_LAYERS=${MODEL_NUM_LAYERS}"
     echo "MODEL_HIDDEN_UNITS=${MODEL_HIDDEN_UNITS}"
     echo "MODEL_BATCH_SIZE=${MODEL_BATCH_SIZE}"
-    echo "MODEL_PREDICTION_MODE=${MODEL_PREDICTION_MODE}"
-    echo "MODEL_TRAIN_SAMPLE_STRIDE=${MODEL_TRAIN_SAMPLE_STRIDE}"
-    echo "MODEL_VAL_FRACTION=${MODEL_VAL_FRACTION}"
-    echo "MODEL_VAL_EVERY_N_EPOCHS=${MODEL_VAL_EVERY_N_EPOCHS}"
-    echo "MODEL_VAL_ROLLOUT_STEPS=${MODEL_VAL_ROLLOUT_STEPS}"
-    echo "MODEL_COMPACT_BATCHES=${MODEL_COMPACT_BATCHES}"
-    echo "MODEL_INIT_CHECKPOINT=${MODEL_INIT_CHECKPOINT}"
+    echo "MODEL_LEARNING_RATE=${MODEL_LEARNING_RATE}"
     echo "SLURM_JOB_ID=${SLURM_JOB_ID:-unset}"
     echo "SLURM_NODELIST=${SLURM_NODELIST:-unset}"
     echo "SLURM_NTASKS=${SLURM_NTASKS:-unset}"

@@ -1,15 +1,11 @@
 import argparse
 import json
-import random
 import re
-import time
 from pathlib import Path
 
 import optuna
 import pytorch_lightning as pl
 import torch
-from sqlalchemy import event
-from sqlalchemy.exc import OperationalError
 from optuna.trial import TrialState
 
 import settings as config
@@ -34,29 +30,39 @@ def parse_devices(devices):
     return devices
 
 
-def objective(trial, args, split_dir):
+def suggest_params(trial):
     search = config.OPTUNA_SEARCH_SPACE
-    params = {
-        "num_hidden_layers": args.hidden_layers,
-        "num_neurons_per_hidden_layer": args.hidden_units,
+    return {
+        "num_hidden_layers": trial.suggest_int(
+            "num_hidden_layers",
+            search["num_layers"]["low"],
+            search["num_layers"]["high"],
+        ),
+        "num_neurons_per_hidden_layer": trial.suggest_int(
+            "num_neurons_per_hidden_layer",
+            search["hidden_units"]["low"],
+            search["hidden_units"]["high"],
+            step=search["hidden_units"]["step"],
+        ),
         "learning_rate": trial.suggest_float(
             "learning_rate",
             search["learning_rate"]["low"],
             search["learning_rate"]["high"],
             log=search["learning_rate"]["log"],
         ),
-        "batch_size": args.batch_size,
+        "batch_size": trial.suggest_categorical(
+            "batch_size", search["batch_size"]["choices"]
+        ),
     }
+
+
+def objective(trial, args, split_dir):
+    params = suggest_params(trial)
 
     data = GravCollapseDataModule(
         data_dir=str(split_dir),
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
-        max_rollout_steps=args.rollout_steps,
-        val_rollout_steps=args.val_rollout_steps,
-        train_sample_stride=args.train_sample_stride,
-        val_fraction=args.val_fraction,
-        compact_batches=args.compact_batches,
     )
     data.setup("fit")
     model_config = {
@@ -65,16 +71,9 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
-        "prediction_mode": args.prediction_mode,
-        "use_layer_norm": args.use_layer_norm,
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
-    if args.init_checkpoint is not None:
-        checkpoint = torch.load(args.init_checkpoint, map_location="cpu", weights_only=False)
-        model.load_state_dict(checkpoint["state_dict"], strict=True)
-    train_batches = len(data.train_dataloader())
-    val_batches = len(data.val_dataloader())
     num_parameters = sum(param.numel() for param in model.parameters())
 
     print(
@@ -87,17 +86,8 @@ def objective(trial, args, split_dir):
         f"parameters={num_parameters:,}; "
         f"training: batch_size={params['batch_size']}, "
         f"learning_rate={params['learning_rate']:.6g}, "
-        f"rollout_steps={args.rollout_steps}, "
-        f"train_stride={args.train_sample_stride}, "
-        f"val_fraction={args.val_fraction:.3g}, "
-        f"val_rollout_steps={data.val_rollout_steps}, "
-        f"val_every_n_epochs={args.val_every_n_epochs}, "
-        f"compact_batches={args.compact_batches}, "
-        f"init_checkpoint={args.init_checkpoint or 'none'}, "
         f"train_samples={len(data.train_ds):,}, "
-        f"val_samples={len(data.val_ds):,}, "
-        f"train_batches={train_batches:,}, "
-        f"val_batches={val_batches:,}",
+        f"val_samples={len(data.val_ds):,}",
         flush=True,
     )
 
@@ -117,7 +107,7 @@ def objective(trial, args, split_dir):
                 patience=args.patience,
                 mode="min",
                 verbose=False,
-            )
+            ),
         ],
         logger=(
             pl.loggers.TensorBoardLogger(
@@ -131,7 +121,6 @@ def objective(trial, args, split_dir):
         enable_checkpointing=False,
         enable_model_summary=False,
         log_every_n_steps=10,
-        check_val_every_n_epoch=max(1, args.val_every_n_epochs),
     )
     trainer.fit(model, datamodule=data)
     val_loss = trainer.callback_metrics.get("val_loss")
@@ -166,47 +155,6 @@ def sqlite_path_from_storage(storage):
     if match is None:
         return None
     return Path(match.group(1)).expanduser().resolve()
-
-
-def is_sqlite_storage(storage):
-    return isinstance(storage, str) and storage.startswith("sqlite:")
-
-
-def build_optuna_storage(storage, sqlite_timeout_seconds=600):
-    """Return an Optuna storage object with safer SQLite concurrency defaults."""
-    if not is_sqlite_storage(storage):
-        return storage
-
-    rdb_storage = optuna.storages.RDBStorage(
-        url=storage,
-        engine_kwargs={
-            "connect_args": {"timeout": sqlite_timeout_seconds},
-            "pool_pre_ping": True,
-        },
-    )
-
-    @event.listens_for(rdb_storage.engine, "connect")
-    def configure_sqlite_connection(dbapi_connection, _connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute(f"PRAGMA busy_timeout = {sqlite_timeout_seconds * 1000}")
-        cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA synchronous = NORMAL")
-        cursor.close()
-
-    return rdb_storage
-
-
-def is_retryable_storage_error(exc):
-    message = str(exc).lower()
-    retryable_fragments = (
-        "already exists",
-        "database is locked",
-        "database table is locked",
-        "database schema is locked",
-        "sqlite_busy",
-        "sqlite_locked",
-    )
-    return any(fragment in message for fragment in retryable_fragments)
 
 
 def reset_sqlite_storage(storage):
@@ -250,41 +198,23 @@ def finished_trial_count(study):
     )
 
 
-def create_study_with_retry(args, storage, retries=5, delay_seconds=2.0):
-    """Create or load an Optuna study, tolerating concurrent SQLite initialization."""
-    for attempt in range(retries + 1):
-        try:
-            return optuna.create_study(
-                study_name=args.study_name,
-                storage=build_optuna_storage(storage),
-                direction="minimize",
-                load_if_exists=True,
-                pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
-            )
-        except OperationalError as exc:
-            if not is_retryable_storage_error(exc) or attempt == retries:
-                raise
-            sleep_time = delay_seconds * (attempt + 1) + random.uniform(0.0, delay_seconds)
-            print(
-                "Optuna storage operation raced with another process; "
-                f"retrying in {sleep_time:.1f}s.",
-                flush=True,
-            )
-            time.sleep(sleep_time)
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Optimize MLP hyperparameters for a split dataset directory."
+        description="Optimize MLP hyperparameters for a split dataset directory (sequential Optuna study)."
     )
     parser.add_argument(
         "dataset_path",
         nargs="?",
         default=None,
-        help="Split directory with train/val/test.csv (default: best-sampler split).",
+        help="Split directory with train/val/test splits (default: configured split).",
     )
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
-    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_OPTUNA_RESULTS_DIR)
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=None,
+        help="Defaults to results/{dataset_name}/mlp/optimization.",
+    )
     parser.add_argument("--num-trials", type=int, default=config.OPTUNA_N_TRIALS)
     parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_TUNE_EPOCHS)
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_STUDY_NAME)
@@ -300,19 +230,6 @@ def main():
         ),
     )
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
-    parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
-    parser.add_argument("--hidden-layers", type=int, default=config.NUM_LAYERS)
-    parser.add_argument("--hidden-units", type=int, default=config.HIDDEN_UNITS)
-    parser.add_argument("--batch-size", type=int, default=config.BATCH_SIZE)
-    parser.add_argument("--no-layer-norm", dest="use_layer_norm", action="store_false")
-    parser.set_defaults(use_layer_norm=True)
-    parser.add_argument("--prediction-mode", choices=("direct", "delta"), default="direct")
-    parser.add_argument("--train-sample-stride", type=int, default=1)
-    parser.add_argument("--val-fraction", type=float, default=1.0)
-    parser.add_argument("--val-every-n-epochs", type=int, default=1)
-    parser.add_argument("--val-rollout-steps", type=int, default=None)
-    parser.add_argument("--compact-batches", action="store_true")
-    parser.add_argument("--init-checkpoint", type=Path, default=None)
     parser.add_argument("--no-logger", dest="enable_logger", action="store_false")
     parser.set_defaults(enable_logger=True)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
@@ -328,21 +245,23 @@ def main():
 
     dataset_path = args.data_dir or args.dataset_path
     split_dir = config.resolve_split_dir(dataset_path)
+    if args.results_dir is None:
+        args.results_dir = config.experiment_dir(split_dir) / "optimization"
     args.results_dir = Path(args.results_dir).expanduser().resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
-    if args.init_checkpoint is not None:
-        args.init_checkpoint = args.init_checkpoint.expanduser().resolve()
-        if not args.init_checkpoint.is_file():
-            raise FileNotFoundError(
-                f"Initialization checkpoint not found: {args.init_checkpoint}"
-            )
 
     configured_storage = None if config.OPTUNA_STORAGE == "auto" else config.OPTUNA_STORAGE
     storage = args.storage or configured_storage or f"sqlite:///{args.results_dir / 'optuna.sqlite3'}"
     if args.journal_mode == "fresh":
         reset_sqlite_storage(storage)
     prepare_storage_for_resume(storage)
-    study = create_study_with_retry(args, storage)
+    study = optuna.create_study(
+        study_name=args.study_name,
+        storage=storage,
+        direction="minimize",
+        load_if_exists=True,
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+    )
     existing_finished_trials = 0 if args.journal_mode == "fresh" else finished_trial_count(study)
     trials_to_run = max(0, args.num_trials - existing_finished_trials)
     print(

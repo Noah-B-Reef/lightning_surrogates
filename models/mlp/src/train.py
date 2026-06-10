@@ -5,7 +5,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
-import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -103,7 +102,7 @@ def plot_history(history, output_path):
         plt.plot(history["val_loss"], label="Validation loss")
     plt.yscale("log")
     plt.xlabel("Epoch")
-    plt.ylabel("Smooth L1 loss")
+    plt.ylabel("L1 loss")
     plt.title("Training and Validation Loss")
     plt.grid(True, alpha=0.3, which="both")
     plt.legend()
@@ -115,37 +114,32 @@ def plot_history(history, output_path):
 def train_final_model(
     best_config,
     split_dir,
-    results_dir,
+    results_dir=None,
     *,
     num_epochs=None,
     checkpoint_name=config.CHECKPOINT_NAME,
-    save_epoch_checkpoints=True,
     accelerator=config.ACCELERATOR,
     devices=config.NUM_DEVICES,
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
-    rollout_steps=config.ROLLOUT_STEPS,
-    prediction_mode="direct",
     early_stopping=True,
-    batch_size=None,
-    hidden_layers=None,
-    hidden_units=None,
-    use_layer_norm=True,
-    train_sample_stride=1,
-    val_fraction=1.0,
-    val_every_n_epochs=1,
-    val_rollout_steps=None,
-    compact_batches=False,
-    init_checkpoint=None,
+    early_stopping_patience=config.EARLY_STOPPING_PATIENCE,
+    early_stopping_min_relative_improvement=(
+        config.EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT
+    ),
     enable_logger=True,
+    seed=42,
 ):
+    pl.seed_everything(int(seed), workers=True)
     split_dir = config.resolve_split_dir(split_dir)
+    # Each experiment gets its own results/{dataset_name}/{architecture} dir.
+    if results_dir is None:
+        results_dir = config.experiment_dir(split_dir)
     results_dir = Path(results_dir).expanduser().resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     num_epochs = int(num_epochs or config.EPOCHS)
-    batch_size = int(batch_size or best_config["batch_size"])
-    hidden_layers = int(hidden_layers or best_config["num_hidden_layers"])
-    hidden_units = int(hidden_units or best_config["num_neurons_per_hidden_layer"])
+    batch_size = int(best_config["batch_size"])
+    learning_rate = float(best_config["learning_rate"])
 
     log_dir = results_dir / "lightning_logs" / "mlp_grav_collapse"
     if log_dir.exists():
@@ -155,48 +149,32 @@ def train_final_model(
         data_dir=str(split_dir),
         batch_size=batch_size,
         num_workers=int(num_workers),
-        max_rollout_steps=int(rollout_steps),
-        val_rollout_steps=val_rollout_steps,
-        train_sample_stride=train_sample_stride,
-        val_fraction=val_fraction,
-        compact_batches=compact_batches,
     )
     data.setup("fit")
     model_config = {
         "num_inputs": data.num_features,
         "output_size": data.num_targets,
-        "num_hidden_layers": hidden_layers,
-        "num_neurons_per_hidden_layer": hidden_units,
-        "learning_rate": float(best_config["learning_rate"]),
-        "prediction_mode": prediction_mode,
-        "use_layer_norm": bool(use_layer_norm),
+        "num_hidden_layers": int(best_config["num_hidden_layers"]),
+        "num_neurons_per_hidden_layer": int(
+            best_config["num_neurons_per_hidden_layer"]
+        ),
+        "learning_rate": learning_rate,
+        "seed": int(seed),
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
-    if init_checkpoint is not None:
-        checkpoint_path = Path(init_checkpoint).expanduser().resolve()
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(checkpoint["state_dict"], strict=True)
-        print(f"Initialized model weights from {checkpoint_path}", flush=True)
-    train_batches = len(data.train_dataloader())
-    val_batches = len(data.val_dataloader())
     num_parameters = sum(param.numel() for param in model.parameters())
 
     print(
         "Starting final training: "
         f"epochs={num_epochs}, "
         f"batch_size={batch_size}, "
-        f"learning_rate={best_config['learning_rate']:.6g}, "
+        f"learning_rate={learning_rate:.6g}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}, "
-        f"train_batches={train_batches:,}, "
-        f"val_batches={val_batches:,}, "
         f"parameters={num_parameters:,}, "
-        f"prediction_mode={prediction_mode}, "
-        f"train_stride={train_sample_stride}, "
-        f"val_fraction={val_fraction:.3g}, "
-        f"val_rollout_steps={data.val_rollout_steps}, "
-        f"compact_batches={compact_batches}",
+        f"results_dir={results_dir}, "
+        f"seed={seed}",
         flush=True,
     )
 
@@ -218,16 +196,12 @@ def train_final_model(
     if early_stopping:
         callbacks.insert(
             0,
-            RelativeImprovementEarlyStopping(monitor="val_loss", patience=8, mode="min"),
-        )
-    if save_epoch_checkpoints:
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=str(results_dir / "epoch_checkpoints"),
-                filename="epoch-{epoch:04d}",
-                save_top_k=-1,
-                every_n_epochs=1,
-            )
+            RelativeImprovementEarlyStopping(
+                monitor="val_loss",
+                min_relative_improvement=early_stopping_min_relative_improvement,
+                patience=early_stopping_patience,
+                mode="min",
+            ),
         )
 
     trainer = pl.Trainer(
@@ -246,7 +220,7 @@ def train_final_model(
         ),
         gradient_clip_val=1.0,
         log_every_n_steps=10,
-        check_val_every_n_epoch=max(1, int(val_every_n_epochs)),
+        deterministic=True,
     )
     trainer.fit(model, datamodule=data)
 
@@ -280,62 +254,42 @@ def main(
     dataset_path=None,
     num_epochs=None,
     config_file=None,
-    checkpoint_name="mlp_grav_collapse.ckpt",
+    checkpoint_name=config.CHECKPOINT_NAME,
     use_defaults=False,
-    results_dir=config.DEFAULT_RESULTS_DIR,
-    data_dir=None,
+    results_dir=None,
     accelerator=config.ACCELERATOR,
     devices=config.NUM_DEVICES,
     precision=config.PRECISION,
     num_workers=config.NUM_WORKERS,
-    save_epoch_checkpoints=True,
-    rollout_steps=config.ROLLOUT_STEPS,
-    prediction_mode="direct",
     early_stopping=True,
-    batch_size=None,
-    hidden_layers=None,
-    hidden_units=None,
-    use_layer_norm=True,
-    train_sample_stride=1,
-    val_fraction=1.0,
-    val_every_n_epochs=1,
-    val_rollout_steps=None,
-    compact_batches=False,
-    init_checkpoint=None,
+    early_stopping_patience=config.EARLY_STOPPING_PATIENCE,
+    early_stopping_min_relative_improvement=(
+        config.EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT
+    ),
     enable_logger=True,
+    seed=42,
 ):
-    split_dir = data_dir or dataset_path
-    if use_defaults:
+    if use_defaults or config_file is None:
         best_config = default_config()
     else:
-        if config_file is None:
-            config_file = config.TRAIN_CONFIG_FILE
         best_config = load_best_config(config_file)
     return train_final_model(
         best_config,
-        split_dir,
+        dataset_path,
         results_dir,
         num_epochs=num_epochs,
         checkpoint_name=checkpoint_name,
-        save_epoch_checkpoints=save_epoch_checkpoints,
         accelerator=accelerator,
         devices=devices,
         precision=precision,
         num_workers=num_workers,
-        rollout_steps=rollout_steps,
-        prediction_mode=prediction_mode,
         early_stopping=early_stopping,
-        batch_size=batch_size,
-        hidden_layers=hidden_layers,
-        hidden_units=hidden_units,
-        use_layer_norm=use_layer_norm,
-        train_sample_stride=train_sample_stride,
-        val_fraction=val_fraction,
-        val_every_n_epochs=val_every_n_epochs,
-        val_rollout_steps=val_rollout_steps,
-        compact_batches=compact_batches,
-        init_checkpoint=init_checkpoint,
+        early_stopping_patience=early_stopping_patience,
+        early_stopping_min_relative_improvement=(
+            early_stopping_min_relative_improvement
+        ),
         enable_logger=enable_logger,
+        seed=seed,
     )
 
 
@@ -344,60 +298,52 @@ if __name__ == "__main__":
     parser.add_argument("dataset_path", nargs="?", default=None)
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--config-file", type=Path, default=config.TRAIN_CONFIG_FILE)
+    parser.add_argument(
+        "--config-file",
+        type=Path,
+        default=None,
+        help="best_params.json from optimization; defaults used when omitted.",
+    )
     parser.add_argument("--checkpoint", type=str, default=config.CHECKPOINT_NAME)
     parser.add_argument("--use-defaults", action="store_true")
-    parser.add_argument("--results-dir", type=Path, default=config.DEFAULT_RESULTS_DIR)
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=None,
+        help="Defaults to results/{dataset_name}/mlp derived from the split dir.",
+    )
     parser.add_argument("--num-workers", type=int, default=config.NUM_WORKERS)
-    parser.add_argument("--rollout-steps", type=int, default=config.ROLLOUT_STEPS)
     parser.add_argument("--accelerator", type=str, default=config.ACCELERATOR)
     parser.add_argument("--devices", default=config.NUM_DEVICES)
     parser.add_argument("--precision", default=config.PRECISION)
-    parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--hidden-layers", type=int, default=None)
-    parser.add_argument("--hidden-units", type=int, default=None)
-    parser.add_argument("--no-layer-norm", action="store_true")
-    parser.add_argument("--train-sample-stride", type=int, default=1)
-    parser.add_argument("--val-fraction", type=float, default=1.0)
-    parser.add_argument("--val-every-n-epochs", type=int, default=1)
-    parser.add_argument("--val-rollout-steps", type=int, default=None)
-    parser.add_argument("--compact-batches", action="store_true")
-    parser.add_argument("--init-checkpoint", type=Path, default=None)
-    parser.add_argument("--no-logger", action="store_true")
     parser.add_argument(
-        "--prediction-mode",
-        choices=("direct", "delta"),
-        default="direct",
-        help="direct predicts x_{t+1}; delta predicts dx and advances x_{t+1}=x_t+dx.",
+        "--early-stopping-patience", type=int, default=config.EARLY_STOPPING_PATIENCE
     )
+    parser.add_argument(
+        "--early-stopping-min-relative-improvement",
+        type=float,
+        default=config.EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT,
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-logger", action="store_true")
     parser.add_argument("--no-early-stopping", action="store_true")
-    parser.add_argument("--no-epoch-checkpoints", action="store_true")
     args = parser.parse_args()
     main(
-        dataset_path=args.dataset_path,
+        dataset_path=args.data_dir or args.dataset_path,
         num_epochs=args.epochs,
         config_file=args.config_file,
         checkpoint_name=args.checkpoint,
         use_defaults=args.use_defaults,
         results_dir=args.results_dir,
-        data_dir=args.data_dir,
         accelerator=args.accelerator,
         devices=args.devices,
         precision=args.precision,
         num_workers=args.num_workers,
-        rollout_steps=args.rollout_steps,
-        prediction_mode=args.prediction_mode,
         early_stopping=not args.no_early_stopping,
-        batch_size=args.batch_size,
-        hidden_layers=args.hidden_layers,
-        hidden_units=args.hidden_units,
-        use_layer_norm=not args.no_layer_norm,
-        train_sample_stride=args.train_sample_stride,
-        val_fraction=args.val_fraction,
-        val_every_n_epochs=args.val_every_n_epochs,
-        val_rollout_steps=args.val_rollout_steps,
-        compact_batches=args.compact_batches,
-        init_checkpoint=args.init_checkpoint,
+        early_stopping_patience=args.early_stopping_patience,
+        early_stopping_min_relative_improvement=(
+            args.early_stopping_min_relative_improvement
+        ),
         enable_logger=not args.no_logger,
-        save_epoch_checkpoints=not args.no_epoch_checkpoints,
+        seed=args.seed,
     )
