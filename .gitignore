@@ -40,3 +40,7 @@ error/
 
 # TensorBoard / training events
 events.out.tfevents.*
+
+# Local agent-tool artifacts
+agent-orchestrator.yaml
+.antigravitycli/
