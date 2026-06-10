@@ -9,10 +9,11 @@ feed-forward MLP trained with L1 loss on the log10 abundances: it maps
 ## Configuration
 
 All path-specific settings and pipeline arguments live in the shared repo
-config at `lightning_surrogates/config.sh` (override its location with
-`LS_CONFIG`). The SLURM scripts source it, and the Python entry points read
-the same values through `src/settings.py`. Paths default to the repository
-location, so the same config works locally and on TACC.
+config at `lightning_surrogates/config.sh`. The SLURM scripts source it
+directly (location override: `LS_CONFIG`); the Python entry points simply
+read the resulting environment variables through `src/settings.py`. For
+local runs, `source config.sh` first — or skip it entirely: the Python
+defaults are repo-relative and match the standard layout.
 
 Key values:
 

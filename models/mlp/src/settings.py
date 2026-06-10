@@ -1,3 +1,13 @@
+"""Typed defaults for the MLP pipeline, read from the environment.
+
+The single source of configuration is the shell config at the repo root
+(``lightning_surrogates/config.sh``). SLURM jobs get it because
+``slurm/common.sh`` sources it before running Python; for local runs either
+``source config.sh`` first or rely on the repo-relative defaults below, which
+match the standard layout (raw data and splits in the sibling ``datasets/``
+directory). This module performs no config-file parsing of its own.
+"""
+
 import os
 from pathlib import Path
 
@@ -6,52 +16,6 @@ SRC_DIR = Path(__file__).resolve().parent
 MLP_DIR = SRC_DIR.parent
 LIGHTNING_SURROGATES_DIR = SRC_DIR.parents[2]
 RESEARCH_DIR = SRC_DIR.parents[3]
-
-# Single shared config file at the repository root. It is a shell-sourceable
-# key=value file so the SLURM scripts and the Python entry points read the
-# exact same values. Override with LS_CONFIG.
-DEFAULT_CONFIG_FILE = LIGHTNING_SURROGATES_DIR / "config.sh"
-CONFIG_FILE = Path(
-    os.environ.get("LS_CONFIG") or DEFAULT_CONFIG_FILE
-).expanduser().resolve()
-
-
-def load_env_file(path):
-    """Load variables from a config.sh shell file into os.environ if not already set.
-
-    Supports ``${VAR}`` references to earlier variables. Lines using command
-    substitution (``$(...)``) are skipped; the anchors they would compute
-    (REPO_DIR, RESEARCH_DIR) are pre-seeded from this file's location instead.
-    """
-    path = Path(path).expanduser().resolve()
-    if not path.is_file():
-        return
-    os.environ.setdefault("REPO_DIR", str(LIGHTNING_SURROGATES_DIR))
-    os.environ.setdefault("RESEARCH_DIR", str(RESEARCH_DIR))
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].strip()
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if "$(" in value:
-            continue
-        # Strip quotes / trailing inline comments
-        if value[:1] in {"'", '"'}:
-            closing = value.find(value[0], 1)
-            if closing != -1:
-                value = value[1:closing]
-        else:
-            value = value.split("#", 1)[0].strip()
-        os.environ.setdefault(key, os.path.expandvars(value))
-
-
-load_env_file(CONFIG_FILE)
 
 
 # Helper functions to retrieve typed environment variables
@@ -67,11 +31,11 @@ def env_path(key, default):
 
 
 def env_int(key, default):
-    return int(os.environ.get(key, default))
+    return int(os.environ.get(key, str(default)))
 
 
 def env_float(key, default):
-    return float(os.environ.get(key, default))
+    return float(os.environ.get(key, str(default)))
 
 
 def env_num_workers(key="CONFIG_NUM_WORKERS", default=0):
@@ -85,7 +49,7 @@ def resolve_path(path):
     return Path(path).expanduser().resolve()
 
 
-# Default paths (resolved relative to the workspace unless set in the config)
+# Default paths (resolved relative to the workspace unless set in the environment)
 DEFAULT_DATASETS_DIR = env_path("DATASETS_DIR", RESEARCH_DIR / "datasets")
 DATASET_NAME = env_str("DATASET_NAME", "grav_collapse")
 DEFAULT_SAMPLED_DATASETS_DIR = env_path(
@@ -146,10 +110,10 @@ def resolve_split_dir(dataset_path=None, required=SPLIT_NAMES):
         hint = ""
         if using_default:
             hint = (
-                " No split path was given, so the split configured in config.sh was "
-                "used. Set LS_DATA_DIR (or SAMPLING_PROCEDURE/STORAGE_FORMAT), set "
-                "LS_CONFIG to another config file, or pass an explicit split "
-                "directory."
+                " No split path was given, so the default split was used. Set "
+                "LS_DATA_DIR (or DATASET_NAME/SAMPLING_PROCEDURE/STORAGE_FORMAT) "
+                "in the environment — e.g. `source config.sh` — or pass an "
+                "explicit split directory."
             )
         raise FileNotFoundError(f"Missing {missing} in split directory: {path}.{hint}")
     return path

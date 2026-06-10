@@ -134,7 +134,7 @@ lightning_surrogates/
 │   └── *.slurm                # TACC jobs (source ../config.sh)
 ├── models/mlp/
 │   ├── src/
-│   │   ├── settings.py        # reads config.sh; typed defaults; results paths
+│   │   ├── settings.py        # typed env-var defaults; results paths
 │   │   ├── data.py            # split loading (csv|npy), one-step pair dataset
 │   │   ├── model.py           # MLP LightningModule, L1 loss, phys normalization
 │   │   ├── optimize.py        # sequential Optuna study
@@ -157,9 +157,12 @@ order). The data loader accepts either.
 
 ### Configure once
 
-All paths and stage arguments live in [`config.sh`](config.sh). Defaults
-derive from the repository location (raw data in the sibling `datasets/`
-directory), so the same file works locally and on TACC. Key knobs:
+All paths and stage arguments live in [`config.sh`](config.sh) — a plain
+shell file of `export KEY=value` lines. SLURM scripts source it directly;
+the Python scripts read the same variables from the environment, so for
+local runs either `source config.sh` first or rely on the built-in defaults,
+which derive from the repository location (raw data in the sibling
+`datasets/` directory) and match the standard layout. Key knobs:
 `DATASET_NAME`, `SAMPLING_PROCEDURE`, `STORAGE_FORMAT`, `MODEL_*`,
 `N_TRIALS`, `TRAIN_EPOCHS`. Point `LS_CONFIG` at an alternative file to
 switch configurations without editing the repo.
