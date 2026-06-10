@@ -174,15 +174,15 @@ switch configurations without editing the repo.
 cd samplers
 python run_samplers.py --samplers density --storage-format npy
 
-# 2. Hyperparameter search  →  results/{dataset}/{sampler}/mlp/optimization/
+# 2. Hyperparameter search  →  models/mlp/results/{dataset}/{sampler}/optimization/
 cd ../models/mlp/src
 python optimize.py
 
-# 3. Train with the best parameters  →  results/{dataset}/{sampler}/mlp/
-python train.py --config-file ../../../results/grav_collapse/density/mlp/optimization/best_params.json
+# 3. Train with the best parameters  →  models/mlp/results/{dataset}/{sampler}/
+python train.py --config-file ../results/grav_collapse/density/optimization/best_params.json
 #    (or quick run with config defaults: python train.py --use-defaults)
 
-# 4. Rollout evaluation  →  results/{dataset}/{sampler}/mlp/test_results/
+# 4. Rollout evaluation  →  models/mlp/results/{dataset}/{sampler}/test_results/
 python test.py
 ```
 
