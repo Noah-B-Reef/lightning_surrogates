@@ -63,11 +63,9 @@ DEFAULT_SPLIT_DIR = env_path(
     / env_str("SAMPLING_PROCEDURE", "density")
     / env_str("STORAGE_FORMAT", "npy"),
 )
-# Experiment results live in results/{dataset name}/{sampler}/{architecture}.
-DEFAULT_RESULTS_ROOT = env_path(
-    "RESULTS_ROOT", LIGHTNING_SURROGATES_DIR / "results"
-)
-MODEL_ARCHITECTURE = "mlp"
+# Experiment results live inside this model's directory:
+# models/mlp/results/{dataset name}/{sampler}/.
+DEFAULT_RESULTS_ROOT = env_path("RESULTS_ROOT", MLP_DIR / "results")
 CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", "mlp_grav_collapse.ckpt")
 
 
@@ -87,9 +85,9 @@ def experiment_relpath(split_dir):
 
 
 def experiment_dir(split_dir, results_root=None):
-    """Return results/{dataset name}/{sampler}/{architecture} for a split dir."""
+    """Return {model dir}/results/{dataset name}/{sampler} for a split dir."""
     root = resolve_path(results_root) if results_root else DEFAULT_RESULTS_ROOT
-    return root / experiment_relpath(split_dir) / MODEL_ARCHITECTURE
+    return root / experiment_relpath(split_dir)
 
 
 SPLIT_NAMES = ("train", "val", "test")

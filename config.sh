@@ -35,9 +35,9 @@ export SAMPLERS_RAW_H5="${SAMPLERS_RAW_H5:-${DATASETS_DIR}/${DATASET_NAME}/basel
 export SAMPLED_DATASETS_DIR="${DATASETS_DIR}/sampled_datasets"
 export SAMPLERS_DATA_DIR="${SAMPLED_DATASETS_DIR}/${DATASET_NAME}"
 
-# Experiment results live in
-# {RESULTS_ROOT}/{DATASET_NAME}/{SAMPLING_PROCEDURE}/{model architecture}/.
-export RESULTS_ROOT="${REPO_DIR}/results"
+# Experiment results live inside each model's own directory:
+# models/{architecture}/results/{DATASET_NAME}/{SAMPLING_PROCEDURE}/.
+# Set RESULTS_ROOT to relocate them (defaults to the model's results/ dir).
 
 # ---------------------------------------------------------------------------
 # Sampling

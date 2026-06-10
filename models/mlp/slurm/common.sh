@@ -19,8 +19,9 @@ source "${LS_CONFIG}"
 
 SCRIPT_DIR="${MLP_DIR}"
 
-# results/{dataset name}/{sampler}/{model architecture}
-EXPERIMENT_DIR="${RESULTS_ROOT}/${DATASET_NAME}/${SAMPLING_PROCEDURE}/mlp"
+# Experiment results live inside the model directory:
+# models/mlp/results/{dataset name}/{sampler}
+EXPERIMENT_DIR="${RESULTS_ROOT:-${MLP_DIR}/results}/${DATASET_NAME}/${SAMPLING_PROCEDURE}"
 OPTUNA_RESULTS_DIR="${EXPERIMENT_DIR}/optimization"
 export EXPERIMENT_DIR
 export OPTUNA_RESULTS_DIR

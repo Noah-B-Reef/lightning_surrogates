@@ -21,7 +21,7 @@ Key values:
 |----------|---------|
 | `DATASET_NAME`, `SAMPLING_PROCEDURE`, `STORAGE_FORMAT` | Select the split: `datasets/sampled_datasets/{dataset name}/{sampler}/{format}/` |
 | `LS_DATA_DIR` | Explicit split directory (overrides the two above) |
-| `RESULTS_ROOT` | Root of experiment results (default `lightning_surrogates/results`) |
+| `RESULTS_ROOT` | Root of experiment results (default `models/mlp/results`) |
 | `MODEL_*`, `TRAIN_EPOCHS`, `N_TRIALS`, `TUNE_EPOCHS`, ... | Model / training / Optuna arguments |
 
 A split directory must contain `train`, `val`, and `test` splits in either
@@ -35,18 +35,17 @@ train.npy  val.npy  test.npy  columns.json
 
 ## Experiment results layout
 
-Every experiment writes to its own directory:
+Every experiment writes to its own directory inside this model directory:
 
 ```text
-{RESULTS_ROOT}/{dataset name}/{sampler}/{model architecture}/
+models/mlp/results/{dataset name}/{sampler}/
 ```
 
 where the dataset name and sampler come from the split path (e.g.
-`grav_collapse` sampled with `density`) and the architecture is `mlp`.
-For example:
+`grav_collapse` sampled with `density`). For example:
 
 ```text
-results/grav_collapse/density/mlp/
+models/mlp/results/grav_collapse/density/
     optimization/            # Optuna journal, best_params.json
     checkpoints/             # best val_loss checkpoint
     mlp_grav_collapse.ckpt   # final exported checkpoint
@@ -66,7 +65,7 @@ python src/optimize.py /path/to/split --num-trials 25 --tune-epochs 50
 
 Searches layers, hidden units, learning rate, and batch size (see
 `OPTUNA_SEARCH_SPACE` in `src/settings.py`) and writes `best_params.json` to
-`results/{dataset}/{sampler}/mlp/optimization/`. The study journal is a SQLite file in
+`models/mlp/results/{dataset}/{sampler}/optimization/`. The study journal is a SQLite file in
 the same directory; `--journal-mode resume` (default) continues an existing
 study, `--journal-mode fresh` starts over.
 
@@ -85,7 +84,7 @@ python src/test.py /path/to/split
 ```
 
 Runs a full autoregressive rollout per test tracer and writes error summaries
-and rollout plots to `results/{dataset}/{sampler}/mlp/test_results/`.
+and rollout plots to `models/mlp/results/{dataset}/{sampler}/test_results/`.
 
 ## SLURM
 

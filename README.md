@@ -44,10 +44,10 @@ sampled splits   datasets/sampled_datasets/{dataset}/{sampler}/{csv|npy}/
 best_params.json
    │  train.py                  final model, early stopping on val loss
    ▼
-checkpoint + loss curves        results/{dataset}/{sampler}/mlp/
+checkpoint + loss curves        models/mlp/results/{dataset}/{sampler}/
    │  test.py                   autoregressive rollout on test tracers
    ▼
-error summaries + rollout plots results/{dataset}/{sampler}/mlp/test_results/
+error summaries + rollout plots models/mlp/results/{dataset}/{sampler}/test_results/
 ```
 
 ### The math, step by step
@@ -141,8 +141,8 @@ lightning_surrogates/
 │   │   ├── train.py           # final training run
 │   │   ├── test.py            # autoregressive rollout evaluation
 │   │   └── callbacks.py       # epoch printer, relative-improvement early stop
-│   └── slurm/                 # common.sh + optimize/train/test/run jobs
-└── results/                   # results/{dataset}/{sampler}/{architecture}/ (gitignored)
+│   ├── slurm/                 # common.sh + optimize/train/test/pipeline jobs
+│   └── results/               # {dataset}/{sampler}/ experiment outputs (gitignored)
 
 ../datasets/                                    # sibling of this repo
 ├── grav_collapse/baseline/*.h5                 # raw postprocessed chemistry
