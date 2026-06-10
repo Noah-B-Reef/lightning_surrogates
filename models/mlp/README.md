@@ -95,7 +95,13 @@ Submit from this directory (`models/mlp/`); job logs go to `logs/`:
 sbatch slurm/optimize.slurm
 sbatch slurm/train.slurm
 sbatch slurm/test.slurm
-sbatch slurm/run.slurm     # optimize -> train -> test
+sbatch slurm/pipeline.slurm   # sampling -> optimize -> train -> test
+```
+
+To run the full pipeline on a different raw .h5 without editing the config:
+
+```bash
+sbatch --export=ALL,DATASET_NAME=gow17_R0.05_M6.0,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
 ```
 
 Each script sources `slurm/common.sh`, which loads the repo config and

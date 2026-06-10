@@ -197,7 +197,10 @@ cd samplers          && sbatch sample_datasets.slurm   # generate splits
 cd models/mlp        && sbatch slurm/optimize.slurm    # Optuna search
                         sbatch slurm/train.slurm       # final training
                         sbatch slurm/test.slurm        # rollout evaluation
-                        sbatch slurm/run.slurm         # all three in sequence
+                        sbatch slurm/pipeline.slurm    # sampling + all three in sequence
+
+# Full pipeline on a different raw .h5 (no config edits):
+sbatch --export=ALL,DATASET_NAME=my_dataset,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
 ```
 
 The SLURM scripts source `config.sh` through `slurm/common.sh`; job logs go

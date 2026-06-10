@@ -19,12 +19,16 @@ RESEARCH_DIR="${RESEARCH_DIR:-$(dirname "${REPO_DIR}")}"
 export REPO_DIR RESEARCH_DIR
 export DATASETS_DIR="${RESEARCH_DIR}/datasets"
 
-# Name of the source dataset being sampled.
-export DATASET_NAME="grav_collapse"
+# Name of the source dataset being sampled (used as a path component for
+# splits and results).
+export DATASET_NAME="${DATASET_NAME:-grav_collapse}"
 export SAMPLERS_DATASET_NAME="${DATASET_NAME}"
 
-# Raw postprocessed chemistry HDF5 (input to the samplers).
-export SAMPLERS_RAW_H5="${DATASETS_DIR}/${DATASET_NAME}/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5"
+# Raw postprocessed chemistry HDF5 (input to the samplers). THIS is where you
+# point the pipeline at a different .h5 dataset: either edit the default
+# below, or override at submit time without touching this file:
+#   sbatch --export=ALL,DATASET_NAME=gow17_R0.05_M6.0,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
+export SAMPLERS_RAW_H5="${SAMPLERS_RAW_H5:-${DATASETS_DIR}/${DATASET_NAME}/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5}"
 
 # Sampled splits live in
 # {SAMPLED_DATASETS_DIR}/{DATASET_NAME}/{SAMPLING_PROCEDURE}/{STORAGE_FORMAT}/.
@@ -38,8 +42,8 @@ export RESULTS_ROOT="${REPO_DIR}/results"
 # ---------------------------------------------------------------------------
 # Sampling
 # ---------------------------------------------------------------------------
-export SAMPLING_PROCEDURE="density"          # random | density | qr_pivot | svd_fps | similarity_constrained
-export STORAGE_FORMAT="npy"                  # csv | npy
+export SAMPLING_PROCEDURE="${SAMPLING_PROCEDURE:-density}"  # random | density | qr_pivot | svd_fps | similarity_constrained
+export STORAGE_FORMAT="${STORAGE_FORMAT:-npy}"              # csv | npy
 export N_SAMPLES=6000
 export MAX_SIMILARITY_TRACERS=500
 
