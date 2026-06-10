@@ -87,17 +87,19 @@ def resolve_path(path):
 
 # Default paths (resolved relative to the workspace unless set in the config)
 DEFAULT_DATASETS_DIR = env_path("DATASETS_DIR", RESEARCH_DIR / "datasets")
-DEFAULT_SAMPLED_DATASET_DIR = env_path(
-    "SAMPLED_DATASET_DIR",
-    DEFAULT_DATASETS_DIR / "sampled_dataset",
+DATASET_NAME = env_str("DATASET_NAME", "grav_collapse")
+DEFAULT_SAMPLED_DATASETS_DIR = env_path(
+    "SAMPLED_DATASETS_DIR",
+    DEFAULT_DATASETS_DIR / "sampled_datasets",
 )
 DEFAULT_SPLIT_DIR = env_path(
     "LS_DATA_DIR",
-    DEFAULT_SAMPLED_DATASET_DIR
+    DEFAULT_SAMPLED_DATASETS_DIR
+    / DATASET_NAME
     / env_str("SAMPLING_PROCEDURE", "density")
     / env_str("STORAGE_FORMAT", "npy"),
 )
-# Experiment results live in results/{dataset_name}/{model architecture}.
+# Experiment results live in results/{dataset name}/{sampler}/{architecture}.
 DEFAULT_RESULTS_ROOT = env_path(
     "RESULTS_ROOT", LIGHTNING_SURROGATES_DIR / "results"
 )
@@ -105,22 +107,25 @@ MODEL_ARCHITECTURE = "mlp"
 CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", "mlp_grav_collapse.ckpt")
 
 
-def dataset_name_from_split_dir(split_dir):
-    """Derive the dataset name from a split directory.
+def experiment_relpath(split_dir):
+    """Derive {dataset name}/{sampler} from a split directory.
 
-    sampled_dataset/density/npy -> "density"; falls back to the directory
-    name itself when the leaf is not a storage-format directory.
+    sampled_datasets/grav_collapse/density/npy -> grav_collapse/density.
+    Falls back to the sampler directory name alone when the layout does not
+    include a dataset-name level (e.g. an ad-hoc flat split directory).
     """
     split_dir = resolve_path(split_dir)
-    if split_dir.name in ("csv", "npy"):
-        return split_dir.parent.name
-    return split_dir.name
+    sampler_dir = split_dir.parent if split_dir.name in ("csv", "npy") else split_dir
+    dataset_dir = sampler_dir.parent
+    if dataset_dir == sampler_dir or dataset_dir.name in ("", "sampled_datasets", "sampled_dataset", "datasets"):
+        return Path(sampler_dir.name)
+    return Path(dataset_dir.name) / sampler_dir.name
 
 
 def experiment_dir(split_dir, results_root=None):
-    """Return results/{dataset_name}/{model architecture} for a split dir."""
+    """Return results/{dataset name}/{sampler}/{architecture} for a split dir."""
     root = resolve_path(results_root) if results_root else DEFAULT_RESULTS_ROOT
-    return root / dataset_name_from_split_dir(split_dir) / MODEL_ARCHITECTURE
+    return root / experiment_relpath(split_dir) / MODEL_ARCHITECTURE
 
 
 SPLIT_NAMES = ("train", "val", "test")

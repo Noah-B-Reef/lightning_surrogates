@@ -19,14 +19,20 @@ RESEARCH_DIR="${RESEARCH_DIR:-$(dirname "${REPO_DIR}")}"
 export REPO_DIR RESEARCH_DIR
 export DATASETS_DIR="${RESEARCH_DIR}/datasets"
 
+# Name of the source dataset being sampled.
+export DATASET_NAME="grav_collapse"
+export SAMPLERS_DATASET_NAME="${DATASET_NAME}"
+
 # Raw postprocessed chemistry HDF5 (input to the samplers).
-export SAMPLERS_RAW_H5="${DATASETS_DIR}/grav_collapse/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5"
+export SAMPLERS_RAW_H5="${DATASETS_DIR}/${DATASET_NAME}/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5"
 
-# Sampled splits live in {SAMPLED_DATASET_DIR}/{SAMPLING_PROCEDURE}/{STORAGE_FORMAT}/.
-export SAMPLED_DATASET_DIR="${DATASETS_DIR}/sampled_dataset"
-export SAMPLERS_DATA_DIR="${SAMPLED_DATASET_DIR}"
+# Sampled splits live in
+# {SAMPLED_DATASETS_DIR}/{DATASET_NAME}/{SAMPLING_PROCEDURE}/{STORAGE_FORMAT}/.
+export SAMPLED_DATASETS_DIR="${DATASETS_DIR}/sampled_datasets"
+export SAMPLERS_DATA_DIR="${SAMPLED_DATASETS_DIR}/${DATASET_NAME}"
 
-# Experiment results live in {RESULTS_ROOT}/{dataset_name}/{model architecture}/.
+# Experiment results live in
+# {RESULTS_ROOT}/{DATASET_NAME}/{SAMPLING_PROCEDURE}/{model architecture}/.
 export RESULTS_ROOT="${REPO_DIR}/results"
 
 # ---------------------------------------------------------------------------
@@ -38,7 +44,7 @@ export N_SAMPLES=6000
 export MAX_SIMILARITY_TRACERS=500
 
 # Split directory used by optimization/training/testing.
-export LS_DATA_DIR="${SAMPLED_DATASET_DIR}/${SAMPLING_PROCEDURE}/${STORAGE_FORMAT}"
+export LS_DATA_DIR="${SAMPLERS_DATA_DIR}/${SAMPLING_PROCEDURE}/${STORAGE_FORMAT}"
 
 # ---------------------------------------------------------------------------
 # Environment

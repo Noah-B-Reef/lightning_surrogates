@@ -226,13 +226,13 @@ def datasets_save(train_df, test_df, val_df, path, sampling_procedure, storage_f
                columns.json listing the column order shared by all splits.
 
     Example:
-        datasets_save(train, test, val, "sampled_dataset", "density", "npy")
+        datasets_save(train, test, val, "sampled_datasets/grav_collapse", "density", "npy")
 
     writes:
-        sampled_dataset/density/npy/train.npy
-        sampled_dataset/density/npy/val.npy
-        sampled_dataset/density/npy/test.npy
-        sampled_dataset/density/npy/columns.json
+        sampled_datasets/grav_collapse/density/npy/train.npy
+        sampled_datasets/grav_collapse/density/npy/val.npy
+        sampled_datasets/grav_collapse/density/npy/test.npy
+        sampled_datasets/grav_collapse/density/npy/columns.json
 
     Returns:
         Path to the {sampling_procedure}/{storage_format} directory.

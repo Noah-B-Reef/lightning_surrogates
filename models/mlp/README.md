@@ -18,7 +18,7 @@ Key values:
 
 | Variable | Meaning |
 |----------|---------|
-| `SAMPLING_PROCEDURE`, `STORAGE_FORMAT` | Select the split: `datasets/sampled_dataset/{procedure}/{format}/` |
+| `DATASET_NAME`, `SAMPLING_PROCEDURE`, `STORAGE_FORMAT` | Select the split: `datasets/sampled_datasets/{dataset name}/{sampler}/{format}/` |
 | `LS_DATA_DIR` | Explicit split directory (overrides the two above) |
 | `RESULTS_ROOT` | Root of experiment results (default `lightning_surrogates/results`) |
 | `MODEL_*`, `TRAIN_EPOCHS`, `N_TRIALS`, `TUNE_EPOCHS`, ... | Model / training / Optuna arguments |
@@ -37,14 +37,15 @@ train.npy  val.npy  test.npy  columns.json
 Every experiment writes to its own directory:
 
 ```text
-{RESULTS_ROOT}/{dataset_name}/{model architecture}/
+{RESULTS_ROOT}/{dataset name}/{sampler}/{model architecture}/
 ```
 
-where `dataset_name` is the sampling procedure of the split (e.g. `density`)
-and the architecture is `mlp`. For example:
+where the dataset name and sampler come from the split path (e.g.
+`grav_collapse` sampled with `density`) and the architecture is `mlp`.
+For example:
 
 ```text
-results/density/mlp/
+results/grav_collapse/density/mlp/
     optimization/            # Optuna journal, best_params.json
     checkpoints/             # best val_loss checkpoint
     mlp_grav_collapse.ckpt   # final exported checkpoint
@@ -64,7 +65,7 @@ python src/optimize.py /path/to/split --num-trials 25 --tune-epochs 50
 
 Searches layers, hidden units, learning rate, and batch size (see
 `OPTUNA_SEARCH_SPACE` in `src/settings.py`) and writes `best_params.json` to
-`results/{dataset}/mlp/optimization/`. The study journal is a SQLite file in
+`results/{dataset}/{sampler}/mlp/optimization/`. The study journal is a SQLite file in
 the same directory; `--journal-mode resume` (default) continues an existing
 study, `--journal-mode fresh` starts over.
 
@@ -83,7 +84,7 @@ python src/test.py /path/to/split
 ```
 
 Runs a full autoregressive rollout per test tracer and writes error summaries
-and rollout plots to `results/{dataset}/mlp/test_results/`.
+and rollout plots to `results/{dataset}/{sampler}/mlp/test_results/`.
 
 ## SLURM
 

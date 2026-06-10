@@ -53,7 +53,8 @@ any other system:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SAMPLERS_RAW_H5` | `datasets/grav_collapse/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5` | Raw HDF5 file (short alias also accepted) |
-| `SAMPLERS_DATA_DIR` | `datasets/sampled_dataset` | Flattened bundle + split outputs ({sampler}/{format}/) |
+| `SAMPLERS_DATASET_NAME` | `grav_collapse` | Source dataset name (path component) |
+| `SAMPLERS_DATA_DIR` | `datasets/sampled_datasets/{dataset name}` | Flattened bundle + split outputs ({sampler}/{format}/) |
 | `SAMPLERS_RESULTS_DIR` | `lightning_surrogates/samplers/results` | Benchmark JSON and CSV outputs |
 
 On SLURM, these are exported by the shared repo config
@@ -63,7 +64,7 @@ Example (TACC):
 
 ```bash
 export SAMPLERS_RAW_H5=/scratch/$USER/data/grav_collapse_postprocessed_uclchem.h5
-export SAMPLERS_DATA_DIR=/scratch/$USER/sampled_dataset
+export SAMPLERS_DATA_DIR=/scratch/$USER/sampled_datasets/grav_collapse
 export SAMPLERS_RESULTS_DIR=/scratch/$USER/results
 ```
 
@@ -74,6 +75,7 @@ export SAMPLERS_RESULTS_DIR=/scratch/$USER/results
 
 ```
 SAMPLERS_DATA_DIR/{sampling procedure}/{storage format}/
+# i.e. datasets/sampled_datasets/{dataset name}/{sampler}/{format}/
     train.csv  val.csv  test.csv            # csv format
     train.npy  val.npy  test.npy  columns.json   # npy format
 ```
@@ -252,7 +254,7 @@ python run_sampler_benchmark.py --n-samples 6000
 
 ```bash
 export SAMPLERS_RAW_H5=/path/to/grav_collapse_postprocessed_uclchem.h5
-export SAMPLERS_DATA_DIR=/path/to/sampled_dataset
+export SAMPLERS_DATA_DIR=/path/to/sampled_datasets/grav_collapse
 export SAMPLERS_RESULTS_DIR=/path/to/results
 python run_samplers.py --n-samples 500
 python run_sampler_benchmark.py --n-samples 500
@@ -329,7 +331,7 @@ $SAMPLERS_RESULTS_DIR/
 ```bash
 # Generate sampled datasets only.
 sbatch --export=ALL,\
-  SAMPLERS_DATA_DIR=/scratch/$USER/sampled_dataset,\
+  SAMPLERS_DATA_DIR=/scratch/$USER/sampled_datasets/grav_collapse,\
   N_SAMPLES=500 \
   sample_datasets.slurm
 ```
@@ -341,7 +343,7 @@ directories:
 
 ```bash
 sbatch --export=ALL,\
-  SAMPLERS_DATA_DIR=/scratch/$USER/sampled_dataset,\
+  SAMPLERS_DATA_DIR=/scratch/$USER/sampled_datasets/grav_collapse,\
   SAMPLERS_RESULTS_DIR=/scratch/$USER/results,\
   N_SAMPLES=500 \
   benchmark_samplers.slurm
@@ -361,7 +363,7 @@ For the full local pipeline on an interactive node, use the shell wrapper:
 
 ```bash
 export SAMPLERS_RAW_H5=/scratch/$USER/data/grav_collapse_postprocessed_uclchem.h5
-export SAMPLERS_DATA_DIR=/scratch/$USER/sampled_dataset
+export SAMPLERS_DATA_DIR=/scratch/$USER/sampled_datasets/grav_collapse
 export SAMPLERS_RESULTS_DIR=/scratch/$USER/results
 ./run_benchmark.sh
 ```
@@ -377,14 +379,14 @@ If you prefer to run each step individually:
 ```bash
 python flatten_dataset.py \
   --input-h5  /path/to/grav_collapse_postprocessed_uclchem.h5 \
-  --output-path /path/to/sampled_dataset/flattened_dataset.h5
+  --output-path /path/to/sampled_datasets/grav_collapse/flattened_dataset.h5
 ```
 
 Or with env vars:
 
 ```bash
 export SAMPLERS_RAW_H5=/path/to/grav_collapse_postprocessed_uclchem.h5
-export SAMPLERS_DATA_DIR=/path/to/sampled_dataset
+export SAMPLERS_DATA_DIR=/path/to/sampled_datasets/grav_collapse
 python flatten_dataset.py
 ```
 

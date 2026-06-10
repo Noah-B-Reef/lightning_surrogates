@@ -16,9 +16,14 @@ SAMPLERS_RAW_H5
     Both names are accepted; the resolver tries the short alias first, then
     falls back to the full name in the same directory.
 
+SAMPLERS_DATASET_NAME
+    Name of the source dataset (default: grav_collapse). Splits live in
+    ``datasets/sampled_datasets/{dataset name}/{sampler}/{format}/``.
+
 SAMPLERS_DATA_DIR
     Directory that contains ``flattened_dataset.h5`` and receives sampler
-    split output sub-directories ({procedure}/{format}/, e.g. density/npy/).
+    split output sub-directories ({sampler}/{format}/, e.g. density/npy/).
+    Defaults to ``datasets/sampled_datasets/{SAMPLERS_DATASET_NAME}``.
 
 SAMPLERS_RESULTS_DIR
     Directory for benchmark outputs (sampler_benchmark_results.json, etc.).
@@ -37,7 +42,8 @@ RESEARCH_DIR = REPO_DIR.parent                          # research/
 DATASETS_DIR = RESEARCH_DIR / "datasets"                # research/datasets/
 
 # Default relative paths (used when env vars are not set)
-_DEFAULT_DATA_DIR = DATASETS_DIR / "sampled_dataset"
+DEFAULT_DATASET_NAME = os.environ.get("SAMPLERS_DATASET_NAME", "grav_collapse")
+_DEFAULT_DATA_DIR = DATASETS_DIR / "sampled_datasets" / DEFAULT_DATASET_NAME
 _DEFAULT_BUNDLE_PATH = _DEFAULT_DATA_DIR / "flattened_dataset.h5"
 _DEFAULT_RESULTS_DIR = SAMPLERS_DIR / "results"
 
