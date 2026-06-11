@@ -122,6 +122,7 @@ NUM_LAYERS = env_int("MODEL_NUM_LAYERS", 3)
 HIDDEN_UNITS = env_int("MODEL_HIDDEN_UNITS", 256)
 BATCH_SIZE = env_int("MODEL_BATCH_SIZE", 32)
 LEARNING_RATE = env_float("MODEL_LEARNING_RATE", 1e-3)
+LOSS_FUNCTION = env_str("MODEL_LOSS_FUNCTION", "l1")  # l1 | mse | smooth_l1
 EPOCHS = env_int("TRAIN_EPOCHS", env_int("MODEL_EPOCHS", 100))
 NUM_WORKERS = env_num_workers()
 
@@ -145,12 +146,15 @@ OPTUNA_JOURNAL_MODE = env_str("JOURNAL_MODE", "resume")
 OPTUNA_PRUNER_PATIENCE = env_int("PRUNER_PATIENCE", 8)
 OPTUNA_MIN_RELATIVE_IMPROVEMENT = env_float("MIN_RELATIVE_IMPROVEMENT", 0.02)
 
-# Search space for hyperparameter tuning
+# Search space for hyperparameter tuning. Because the training loss function
+# is itself searched, Optuna's objective is val_mse (a fixed metric) so
+# trials with different losses remain comparable.
 OPTUNA_SEARCH_SPACE = {
     "num_layers": {"type": "int", "low": 2, "high": 5},
     "hidden_units": {"type": "int", "low": 128, "high": 512, "step": 128},
     "learning_rate": {"type": "float", "low": 1e-4, "high": 5e-3, "log": True},
     "batch_size": {"type": "categorical", "choices": [32, 64, 128]},
+    "loss_function": {"type": "categorical", "choices": ["l1", "mse", "smooth_l1"]},
 }
 
 # Test settings

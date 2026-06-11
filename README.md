@@ -103,10 +103,12 @@ Optimizer: AdamW with gradient clipping; early stopping when validation loss
 stops improving by a relative threshold.
 
 **5. Hyperparameter search.** A sequential Optuna study (TPE sampler, median
-pruner) minimizes validation L1 loss over hidden layers (2–5), hidden units
-(128–512), learning rate ($10^{-4}$–$5\times10^{-3}$, log scale), and batch
-size (32/64/128). The journal is a SQLite file, so interrupted studies
-resume.
+pruner) searches hidden layers (2–5), hidden units (128–512), learning rate
+($10^{-4}$–$5\times10^{-3}$, log scale), batch size (32/64/128), and the
+training loss function (L1 / MSE / smooth-L1 on the log abundances). The
+objective is validation MSE — a fixed metric, so trials trained with
+different losses remain comparable. The journal is a SQLite file, so
+interrupted studies resume.
 
 **6. Evaluation.** `test.py` runs the *autoregressive* rollout — the regime
 that matters in production, where errors compound:

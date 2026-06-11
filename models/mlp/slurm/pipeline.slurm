@@ -19,8 +19,13 @@
 #   sbatch --export=ALL,DATASET_NAME=gow17_R0.05_M6.0,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
 #
 # Submit from models/mlp: sbatch slurm/pipeline.slurm
+# Locate common.sh whether the job was submitted from models/mlp/ or from
+# models/mlp/slurm/. sbatch copies this script to the slurmd spool directory,
+# so its own path (BASH_SOURCE) is only usable when run outside SLURM.
 if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/slurm/common.sh" ]; then
     source "${SLURM_SUBMIT_DIR}/slurm/common.sh"
+elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/common.sh" ]; then
+    source "${SLURM_SUBMIT_DIR}/common.sh"
 else
     source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 fi

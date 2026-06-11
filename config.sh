@@ -70,6 +70,7 @@ export MODEL_NUM_LAYERS=3
 export MODEL_HIDDEN_UNITS=256
 export MODEL_BATCH_SIZE=1024
 export MODEL_LEARNING_RATE=1e-3
+export MODEL_LOSS_FUNCTION="${MODEL_LOSS_FUNCTION:-l1}"   # l1 | mse | smooth_l1
 export CHECKPOINT_NAME="mlp_grav_collapse.ckpt"
 
 # ---------------------------------------------------------------------------

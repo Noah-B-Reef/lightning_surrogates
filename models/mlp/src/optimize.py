@@ -19,6 +19,7 @@ TRAINING_PARAM_KEYS = (
     "num_neurons_per_hidden_layer",
     "learning_rate",
     "batch_size",
+    "loss_function",
 )
 
 
@@ -53,6 +54,9 @@ def suggest_params(trial):
         "batch_size": trial.suggest_categorical(
             "batch_size", search["batch_size"]["choices"]
         ),
+        "loss_function": trial.suggest_categorical(
+            "loss_function", search["loss_function"]["choices"]
+        ),
     }
 
 
@@ -71,6 +75,7 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
+        "loss_function": params["loss_function"],
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
@@ -86,6 +91,7 @@ def objective(trial, args, split_dir):
         f"parameters={num_parameters:,}; "
         f"training: batch_size={params['batch_size']}, "
         f"learning_rate={params['learning_rate']:.6g}, "
+        f"loss_function={params['loss_function']}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}",
         flush=True,
@@ -123,13 +129,16 @@ def objective(trial, args, split_dir):
         log_every_n_steps=10,
     )
     trainer.fit(model, datamodule=data)
-    val_loss = trainer.callback_metrics.get("val_loss")
-    if val_loss is None:
-        raise RuntimeError("Trial completed without val_loss")
+    # The objective is val_mse, not val_loss: the training loss function is a
+    # search dimension, so trial objectives must be a fixed metric to stay
+    # comparable across trials.
+    val_mse = trainer.callback_metrics.get("val_mse")
+    if val_mse is None:
+        raise RuntimeError("Trial completed without val_mse")
 
     trial.set_user_attr("params_for_training", params)
-    value = float(val_loss.detach().cpu())
-    print(f"[Optuna trial {trial.number}] complete val_loss={value:.6g}", flush=True)
+    value = float(val_mse.detach().cpu())
+    print(f"[Optuna trial {trial.number}] complete val_mse={value:.6g}", flush=True)
     del trainer, model, data
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -147,6 +156,7 @@ def save_best_params(best_params, results_dir, best_value):
         f.write(f"hidden_units={best_params['num_neurons_per_hidden_layer']}\n")
         f.write(f"learning_rate={best_params['learning_rate']}\n")
         f.write(f"batch_size={best_params['batch_size']}\n")
+        f.write(f"loss_function={best_params['loss_function']}\n")
     return json_path, txt_path
 
 
@@ -276,6 +286,7 @@ def main():
         print("No new trials needed; journal already meets the requested target.", flush=True)
 
     raw_best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
+    raw_best_params.setdefault("loss_function", config.LOSS_FUNCTION)
     best_params = {key: raw_best_params[key] for key in TRAINING_PARAM_KEYS}
     json_path, txt_path = save_best_params(best_params, args.results_dir, study.best_value)
 

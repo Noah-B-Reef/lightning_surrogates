@@ -55,6 +55,7 @@ def load_best_config(config_file):
             "num_neurons_per_hidden_layer": int(payload["num_neurons_per_hidden_layer"]),
             "learning_rate": float(payload["learning_rate"]),
             "batch_size": int(payload["batch_size"]),
+            "loss_function": str(payload.get("loss_function", config.LOSS_FUNCTION)),
         }
 
     key_mapping = {
@@ -64,6 +65,7 @@ def load_best_config(config_file):
         "num_neurons_per_hidden_layer": "num_neurons_per_hidden_layer",
         "learning_rate": "learning_rate",
         "batch_size": "batch_size",
+        "loss_function": "loss_function",
     }
     params = {}
     for line in path.read_text().splitlines():
@@ -79,6 +81,8 @@ def load_best_config(config_file):
             params[key] = int(float(value))
         elif key in {"learning_rate"}:
             params[key] = float(value)
+        elif key in {"loss_function"}:
+            params[key] = value.strip()
     if not params:
         raise ValueError(f"No hyperparameters found in {path}")
     return params
@@ -90,6 +94,7 @@ def default_config():
         "num_neurons_per_hidden_layer": config.HIDDEN_UNITS,
         "learning_rate": config.LEARNING_RATE,
         "batch_size": config.BATCH_SIZE,
+        "loss_function": config.LOSS_FUNCTION,
     }
 
 
@@ -102,7 +107,7 @@ def plot_history(history, output_path):
         plt.plot(history["val_loss"], label="Validation loss")
     plt.yscale("log")
     plt.xlabel("Epoch")
-    plt.ylabel("L1 loss")
+    plt.ylabel("Training loss")
     plt.title("Training and Validation Loss")
     plt.grid(True, alpha=0.3, which="both")
     plt.legend()
@@ -140,6 +145,7 @@ def train_final_model(
     num_epochs = int(num_epochs or config.EPOCHS)
     batch_size = int(best_config["batch_size"])
     learning_rate = float(best_config["learning_rate"])
+    loss_function = str(best_config.get("loss_function", config.LOSS_FUNCTION))
 
     log_dir = results_dir / "lightning_logs" / "mlp_grav_collapse"
     if log_dir.exists():
@@ -159,6 +165,7 @@ def train_final_model(
             best_config["num_neurons_per_hidden_layer"]
         ),
         "learning_rate": learning_rate,
+        "loss_function": loss_function,
         "seed": int(seed),
         **data.phys_norm_config(),
     }
@@ -170,6 +177,7 @@ def train_final_model(
         f"epochs={num_epochs}, "
         f"batch_size={batch_size}, "
         f"learning_rate={learning_rate:.6g}, "
+        f"loss_function={loss_function}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}, "
         f"parameters={num_parameters:,}, "

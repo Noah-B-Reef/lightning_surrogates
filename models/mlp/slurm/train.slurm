@@ -13,8 +13,13 @@
 
 # All paths and pipeline arguments come from the repo config (config.sh),
 # loaded by common.sh. Submit from models/mlp: sbatch slurm/<name>.slurm
+# Locate common.sh whether the job was submitted from models/mlp/ or from
+# models/mlp/slurm/. sbatch copies this script to the slurmd spool directory,
+# so its own path (BASH_SOURCE) is only usable when run outside SLURM.
 if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/slurm/common.sh" ]; then
     source "${SLURM_SUBMIT_DIR}/slurm/common.sh"
+elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/common.sh" ]; then
+    source "${SLURM_SUBMIT_DIR}/common.sh"
 else
     source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 fi

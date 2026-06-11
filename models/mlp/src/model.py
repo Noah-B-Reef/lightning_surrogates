@@ -5,12 +5,20 @@ import torchmetrics
 from torch import nn, optim
 
 
+LOSS_FUNCTIONS = {
+    "l1": F.l1_loss,
+    "mse": F.mse_loss,
+    "smooth_l1": F.smooth_l1_loss,
+}
+
+
 class MLP(pl.LightningModule):
     """Simple MLP one-step surrogate.
 
     Input:  [physical parameters at t, log10 abundances at t]
     Output: log10 abundances at t + 1
-    Loss:   L1 on the log10 abundances.
+    Loss:   selectable via config["loss_function"] (l1 | mse | smooth_l1),
+            always computed on the log10 abundances. Default: l1.
     """
 
     def __init__(self, config):
@@ -22,6 +30,12 @@ class MLP(pl.LightningModule):
         hidden_units = int(config["num_neurons_per_hidden_layer"])
         output_size = int(config["output_size"])
         self.learning_rate = float(config.get("learning_rate", 1e-3))
+        self.loss_function = str(config.get("loss_function", "l1"))
+        if self.loss_function not in LOSS_FUNCTIONS:
+            raise ValueError(
+                f"loss_function must be one of {sorted(LOSS_FUNCTIONS)}, "
+                f"got {self.loss_function!r}"
+            )
 
         # Physical-parameter normalization. Stats are computed on the training
         # split (see data.GravCollapseDataModule.phys_norm_config) and stored
@@ -75,7 +89,7 @@ class MLP(pl.LightningModule):
     def _step(self, batch, stage):
         inputs, targets = batch
         preds = self(inputs)
-        loss = F.l1_loss(preds, targets)
+        loss = LOSS_FUNCTIONS[self.loss_function](preds, targets)
         metric = getattr(self, f"{stage}_mse")
         metric(preds, targets)
         self.log(
