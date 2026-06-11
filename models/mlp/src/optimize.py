@@ -54,9 +54,7 @@ def suggest_params(trial):
         "batch_size": trial.suggest_categorical(
             "batch_size", search["batch_size"]["choices"]
         ),
-        "loss_function": trial.suggest_categorical(
-            "loss_function", search["loss_function"]["choices"]
-        ),
+        "loss_function": config.LOSS_FUNCTION,
     }
 
 
@@ -129,9 +127,8 @@ def objective(trial, args, split_dir):
         log_every_n_steps=10,
     )
     trainer.fit(model, datamodule=data)
-    # The objective is val_mse, not val_loss: the training loss function is a
-    # search dimension, so trial objectives must be a fixed metric to stay
-    # comparable across trials.
+    # The objective is val_mse, a fixed metric independent of the configured
+    # training loss.
     val_mse = trainer.callback_metrics.get("val_mse")
     if val_mse is None:
         raise RuntimeError("Trial completed without val_mse")

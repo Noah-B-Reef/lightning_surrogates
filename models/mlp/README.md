@@ -63,10 +63,10 @@ The scripts derive this directory from the split path automatically; pass
 python src/optimize.py /path/to/split --num-trials 25 --tune-epochs 50
 ```
 
-Searches layers, hidden units, learning rate, batch size, and the training
-loss function (`l1` | `mse` | `smooth_l1`; see `OPTUNA_SEARCH_SPACE` in
-`src/settings.py`). Because the loss is itself searched, the Optuna objective
-is validation MSE — a fixed metric comparable across trials. Writes
+Searches layers, hidden units, learning rate, and batch size (see
+`OPTUNA_SEARCH_SPACE` in `src/settings.py`). The training loss function is
+fixed to `LOSS_FUNCTION` (`MODEL_LOSS_FUNCTION` env var). The Optuna objective
+is validation MSE. Writes
 `best_params.json` to
 `models/mlp/results/{dataset}/{sampler}/optimization/`. The study journal is a SQLite file in
 the same directory; `--journal-mode resume` (default) continues an existing

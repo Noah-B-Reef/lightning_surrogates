@@ -146,15 +146,13 @@ OPTUNA_JOURNAL_MODE = env_str("JOURNAL_MODE", "resume")
 OPTUNA_PRUNER_PATIENCE = env_int("PRUNER_PATIENCE", 8)
 OPTUNA_MIN_RELATIVE_IMPROVEMENT = env_float("MIN_RELATIVE_IMPROVEMENT", 0.02)
 
-# Search space for hyperparameter tuning. Because the training loss function
-# is itself searched, Optuna's objective is val_mse (a fixed metric) so
-# trials with different losses remain comparable.
+# Search space for hyperparameter tuning. The training loss function is fixed
+# to LOSS_FUNCTION; Optuna's objective is val_mse (a fixed metric).
 OPTUNA_SEARCH_SPACE = {
     "num_layers": {"type": "int", "low": 2, "high": 5},
     "hidden_units": {"type": "int", "low": 128, "high": 512, "step": 128},
     "learning_rate": {"type": "float", "low": 1e-4, "high": 5e-3, "log": True},
     "batch_size": {"type": "categorical", "choices": [32, 64, 128]},
-    "loss_function": {"type": "categorical", "choices": ["l1", "mse", "smooth_l1"]},
 }
 
 # Test settings
