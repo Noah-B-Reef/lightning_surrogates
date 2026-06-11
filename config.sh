@@ -20,15 +20,16 @@ export REPO_DIR RESEARCH_DIR
 export DATASETS_DIR="${RESEARCH_DIR}/datasets"
 
 # Name of the source dataset being sampled (used as a path component for
-# splits and results).
-export DATASET_NAME="${DATASET_NAME:-grav_collapse}"
+# splits and results). Default is the GOW17 network so the MLP and PINN train
+# on the same data and their results are directly comparable.
+export DATASET_NAME="${DATASET_NAME:-gow17_R0.05_M6.0}"
 export SAMPLERS_DATASET_NAME="${DATASET_NAME}"
 
 # Raw postprocessed chemistry HDF5 (input to the samplers). THIS is where you
 # point the pipeline at a different .h5 dataset: either edit the default
 # below, or override at submit time without touching this file:
-#   sbatch --export=ALL,DATASET_NAME=gow17_R0.05_M6.0,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
-export SAMPLERS_RAW_H5="${SAMPLERS_RAW_H5:-${DATASETS_DIR}/${DATASET_NAME}/baseline/grav_collapse_postprocessed_chemistry_uclchem.h5}"
+#   sbatch --export=ALL,DATASET_NAME=grav_collapse,SAMPLERS_RAW_H5=/path/to/file.h5 slurm/pipeline.slurm
+export SAMPLERS_RAW_H5="${SAMPLERS_RAW_H5:-${DATASETS_DIR}/mbon_impl/GOW2017_network/GOW17_grav_collapse_R0.05_M6.0_postprocessed.h5}"
 
 # Sampled splits live in
 # {SAMPLED_DATASETS_DIR}/{DATASET_NAME}/{SAMPLING_PROCEDURE}/{STORAGE_FORMAT}/.
@@ -71,14 +72,22 @@ export MODEL_HIDDEN_UNITS=256
 export MODEL_BATCH_SIZE=1024
 export MODEL_LEARNING_RATE=1e-3
 export MODEL_LOSS_FUNCTION="${MODEL_LOSS_FUNCTION:-l1}"   # l1 | mse | smooth_l1
-export CHECKPOINT_NAME="mlp_grav_collapse.ckpt"
+export CHECKPOINT_NAME="${CHECKPOINT_NAME:-mlp_${DATASET_NAME}.ckpt}"
+
+# Trace-species loss handling (MLP). Abundances are clipped at
+# MODEL_ABUND_FLOOR before the log10 transform; targets at or below
+# MODEL_TRACE_THRESHOLD are downweighted by MODEL_TRACE_WEIGHT in the loss so
+# unresolved trace species stop dominating it (set the weight to 1 to disable).
+export MODEL_ABUND_FLOOR="${MODEL_ABUND_FLOOR:-1e-25}"
+export MODEL_TRACE_THRESHOLD="${MODEL_TRACE_THRESHOLD:-1e-20}"
+export MODEL_TRACE_WEIGHT="${MODEL_TRACE_WEIGHT:-0.1}"
 
 # ---------------------------------------------------------------------------
 # Hyperparameter optimization (sequential Optuna study)
 # ---------------------------------------------------------------------------
 export N_TRIALS=25
 export TUNE_EPOCHS=50
-export STUDY_NAME="mlp_grav_collapse_optimization"
+export STUDY_NAME="${STUDY_NAME:-mlp_${DATASET_NAME}_optimization}"
 export OPTUNA_STORAGE="auto"                 # auto = sqlite in the optimization results dir
 export JOURNAL_MODE="resume"                 # resume | fresh
 export PRUNER_PATIENCE=8

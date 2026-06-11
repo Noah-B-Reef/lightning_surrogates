@@ -54,14 +54,21 @@ its gross inventory (net charge is ~0 by neutrality).
   exercise the Δt input.
 - [src/validate_rhs.py](src/validate_rhs.py) — checks the RHS against finite
   differences of the dataset and sweeps zeta-unit candidates.
-- [slurm/](slurm/) — train/test jobs; configuration comes from the repo-root
-  `config.sh` (run with `DATASET_NAME=gow17_R0.05_M6.0`).
+- [src/optimize.py](src/optimize.py) — sequential Optuna study mirroring the
+  MLP's: tunes architecture, learning rate, batch size, and the
+  physics/conservation loss weights. Objective is `val_mse`, a data-space
+  metric independent of the loss weights, so trials are comparable.
+- [slurm/](slurm/) — pipeline/optimize/train/test jobs; configuration comes
+  from the repo-root `config.sh` (defaults to `DATASET_NAME=gow17_R0.05_M6.0`).
+  `pipeline.slurm` runs sampling -> optimization -> training -> testing,
+  mirroring `models/mlp/slurm/pipeline.slurm`.
 
 Run locally (lightning conda env):
 
 ```bash
-source config.sh   # or export DATASET_NAME=gow17_R0.05_M6.0
-python models/PINN/src/train.py   # uses LS_DATA_DIR / repo-relative default
+source config.sh
+python models/PINN/src/optimize.py   # optional; writes best_params.json
+python models/PINN/src/train.py      # add --config-file <best_params.json>
 python models/PINN/src/test.py
 ```
 

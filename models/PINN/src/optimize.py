@@ -1,3 +1,12 @@
+"""Optuna hyperparameter search for the GOW17 PINN.
+
+Mirrors models/mlp/src/optimize.py. In addition to the architecture and
+training hyperparameters, the search tunes the PINN loss weights
+(physics_weight, conservation_weight). The objective is val_mse — the
+data-space MSE on log10 abundances — which is independent of the loss
+weights, so trials with different weight settings are directly comparable.
+"""
+
 import argparse
 import json
 import re
@@ -10,8 +19,8 @@ from optuna.trial import TrialState
 
 import settings as config
 from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
-from data import GravCollapseDataModule
-from model import MLP
+from data import GOW17DataModule
+from model import PINN
 
 
 TRAINING_PARAM_KEYS = (
@@ -19,7 +28,8 @@ TRAINING_PARAM_KEYS = (
     "num_neurons_per_hidden_layer",
     "learning_rate",
     "batch_size",
-    "loss_function",
+    "physics_weight",
+    "conservation_weight",
 )
 
 
@@ -54,17 +64,29 @@ def suggest_params(trial):
         "batch_size": trial.suggest_categorical(
             "batch_size", search["batch_size"]["choices"]
         ),
-        "loss_function": config.LOSS_FUNCTION,
+        "physics_weight": trial.suggest_float(
+            "physics_weight",
+            search["physics_weight"]["low"],
+            search["physics_weight"]["high"],
+            log=search["physics_weight"]["log"],
+        ),
+        "conservation_weight": trial.suggest_float(
+            "conservation_weight",
+            search["conservation_weight"]["low"],
+            search["conservation_weight"]["high"],
+            log=search["conservation_weight"]["log"],
+        ),
     }
 
 
 def objective(trial, args, split_dir):
     params = suggest_params(trial)
 
-    data = GravCollapseDataModule(
+    data = GOW17DataModule(
         data_dir=str(split_dir),
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
+        max_horizon=args.max_horizon,
     )
     data.setup("fit")
     model_config = {
@@ -73,12 +95,16 @@ def objective(trial, args, split_dir):
         "num_hidden_layers": params["num_hidden_layers"],
         "num_neurons_per_hidden_layer": params["num_neurons_per_hidden_layer"],
         "learning_rate": params["learning_rate"],
-        "loss_function": params["loss_function"],
-        "trace_threshold_log10": config.TRACE_THRESHOLD_LOG10,
-        "trace_weight": config.TRACE_WEIGHT,
+        "physics_weight": params["physics_weight"],
+        "conservation_weight": params["conservation_weight"],
+        "dt_ref_years": config.DT_REF_YEARS,
+        "zeta_unit": config.ZETA_UNIT,
+        "residual_rate_floor": config.RESIDUAL_RATE_FLOOR,
+        "random_collocation": bool(config.RANDOM_COLLOCATION),
+        "max_horizon": args.max_horizon,
         **data.phys_norm_config(),
     }
-    model = MLP(model_config)
+    model = PINN(model_config)
     num_parameters = sum(param.numel() for param in model.parameters())
 
     print(
@@ -91,7 +117,8 @@ def objective(trial, args, split_dir):
         f"parameters={num_parameters:,}; "
         f"training: batch_size={params['batch_size']}, "
         f"learning_rate={params['learning_rate']:.6g}, "
-        f"loss_function={params['loss_function']}, "
+        f"physics_weight={params['physics_weight']:.6g}, "
+        f"conservation_weight={params['conservation_weight']:.6g}, "
         f"train_samples={len(data.train_ds):,}, "
         f"val_samples={len(data.val_ds):,}",
         flush=True,
@@ -105,7 +132,7 @@ def objective(trial, args, split_dir):
         callbacks=[
             EpochProgressPrinter(
                 prefix=f"[Optuna trial {trial.number}]",
-                metric_names=("train_loss", "val_loss"),
+                metric_names=("train_loss", "val_loss", "val_physics_loss"),
             ),
             RelativeImprovementEarlyStopping(
                 monitor="val_loss",
@@ -126,11 +153,17 @@ def objective(trial, args, split_dir):
         ),
         enable_checkpointing=False,
         enable_model_summary=False,
+        gradient_clip_val=1.0,
         log_every_n_steps=10,
+        # Same constraints as training (see train.py): the physics loss
+        # differentiates through the autograd time derivative, so
+        # deterministic mode and inference_mode must stay off.
+        deterministic=False,
+        inference_mode=False,
     )
     trainer.fit(model, datamodule=data)
-    # The objective is val_mse, a fixed metric independent of the configured
-    # training loss.
+    # The objective is val_mse, a fixed data-space metric independent of the
+    # trial's loss weights.
     val_mse = trainer.callback_metrics.get("val_mse")
     if val_mse is None:
         raise RuntimeError("Trial completed without val_mse")
@@ -155,7 +188,8 @@ def save_best_params(best_params, results_dir, best_value):
         f.write(f"hidden_units={best_params['num_neurons_per_hidden_layer']}\n")
         f.write(f"learning_rate={best_params['learning_rate']}\n")
         f.write(f"batch_size={best_params['batch_size']}\n")
-        f.write(f"loss_function={best_params['loss_function']}\n")
+        f.write(f"physics_weight={best_params['physics_weight']}\n")
+        f.write(f"conservation_weight={best_params['conservation_weight']}\n")
     return json_path, txt_path
 
 
@@ -209,7 +243,7 @@ def finished_trial_count(study):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Optimize MLP hyperparameters for a split dataset directory (sequential Optuna study)."
+        description="Optimize PINN hyperparameters for a split dataset directory (sequential Optuna study)."
     )
     parser.add_argument(
         "dataset_path",
@@ -222,10 +256,11 @@ def main():
         "--results-dir",
         type=Path,
         default=None,
-        help="Defaults to results/{dataset_name}/mlp/optimization.",
+        help="Defaults to results/{dataset_name}/{sampler}/pinn/optimization.",
     )
     parser.add_argument("--num-trials", type=int, default=config.OPTUNA_N_TRIALS)
     parser.add_argument("--tune-epochs", type=int, default=config.OPTUNA_TUNE_EPOCHS)
+    parser.add_argument("--max-horizon", type=int, default=config.MAX_HORIZON)
     parser.add_argument("--study-name", type=str, default=config.OPTUNA_STUDY_NAME)
     parser.add_argument("--storage", type=str, default=None)
     parser.add_argument(
@@ -285,7 +320,6 @@ def main():
         print("No new trials needed; journal already meets the requested target.", flush=True)
 
     raw_best_params = study.best_trial.user_attrs.get("params_for_training", dict(study.best_params))
-    raw_best_params.setdefault("loss_function", config.LOSS_FUNCTION)
     best_params = {key: raw_best_params[key] for key in TRAINING_PARAM_KEYS}
     json_path, txt_path = save_best_params(best_params, args.results_dir, study.best_value)
 

@@ -135,6 +135,31 @@ EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT = env_float(
 TEST_NUM_TRACERS = env_int("TEST_NUM_TRACERS", 10)
 
 # ---------------------------------------------------------------------------
+# Hyperparameter optimization (sequential Optuna study, mirrors models/mlp)
+# ---------------------------------------------------------------------------
+OPTUNA_N_TRIALS = env_int("N_TRIALS", 25)
+OPTUNA_TUNE_EPOCHS = env_int("TUNE_EPOCHS", 50)
+OPTUNA_STUDY_NAME = env_str(
+    "PINN_STUDY_NAME", f"pinn_{DATASET_NAME}_optimization"
+)
+OPTUNA_STORAGE = env_str("OPTUNA_STORAGE", "auto")
+OPTUNA_JOURNAL_MODE = env_str("JOURNAL_MODE", "resume")
+OPTUNA_PRUNER_PATIENCE = env_int("PRUNER_PATIENCE", 8)
+OPTUNA_MIN_RELATIVE_IMPROVEMENT = env_float("MIN_RELATIVE_IMPROVEMENT", 0.02)
+
+# Search space. The Optuna objective is val_mse (data-space MSE on log10
+# abundances) — a fixed metric independent of the loss weights, so trials
+# with different physics/conservation weights are comparable.
+OPTUNA_SEARCH_SPACE = {
+    "num_layers": {"type": "int", "low": 2, "high": 6},
+    "hidden_units": {"type": "int", "low": 128, "high": 1024, "step": 128},
+    "learning_rate": {"type": "float", "low": 1e-5, "high": 3e-3, "log": True},
+    "batch_size": {"type": "categorical", "choices": [512, 1024, 2048]},
+    "physics_weight": {"type": "float", "low": 1e-3, "high": 1.0, "log": True},
+    "conservation_weight": {"type": "float", "low": 1e-4, "high": 0.5, "log": True},
+}
+
+# ---------------------------------------------------------------------------
 # PINN-specific settings
 # ---------------------------------------------------------------------------
 # Weight of the ODE-residual loss relative to the data loss.

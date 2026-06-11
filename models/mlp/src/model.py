@@ -31,6 +31,13 @@ class MLP(pl.LightningModule):
         output_size = int(config["output_size"])
         self.learning_rate = float(config.get("learning_rate", 1e-3))
         self.loss_function = str(config.get("loss_function", "l1"))
+        # Trace-species downweighting: loss elements whose target log10
+        # abundance is at or below trace_threshold_log10 are scaled by
+        # trace_weight (1.0 disables). Defaults keep old checkpoints loadable.
+        self.trace_threshold_log10 = float(
+            config.get("trace_threshold_log10", -float("inf"))
+        )
+        self.trace_weight = float(config.get("trace_weight", 1.0))
         if self.loss_function not in LOSS_FUNCTIONS:
             raise ValueError(
                 f"loss_function must be one of {sorted(LOSS_FUNCTIONS)}, "
@@ -89,7 +96,18 @@ class MLP(pl.LightningModule):
     def _step(self, batch, stage):
         inputs, targets = batch
         preds = self(inputs)
-        loss = LOSS_FUNCTIONS[self.loss_function](preds, targets)
+        if self.trace_weight != 1.0:
+            elementwise = LOSS_FUNCTIONS[self.loss_function](
+                preds, targets, reduction="none"
+            )
+            weights = torch.where(
+                targets <= self.trace_threshold_log10,
+                torch.as_tensor(self.trace_weight, device=targets.device),
+                torch.ones((), device=targets.device),
+            )
+            loss = (elementwise * weights).sum() / weights.sum()
+        else:
+            loss = LOSS_FUNCTIONS[self.loss_function](preds, targets)
         metric = getattr(self, f"{stage}_mse")
         metric(preds, targets)
         self.log(

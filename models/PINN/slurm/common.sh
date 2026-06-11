@@ -21,7 +21,10 @@ SCRIPT_DIR="${PINN_DIR}"
 
 # Experiment results live in results/{dataset name}/{sampler}/pinn.
 EXPERIMENT_DIR="${RESULTS_ROOT:-${PINN_DIR}/results}/${DATASET_NAME}/${SAMPLING_PROCEDURE}/pinn"
+OPTUNA_RESULTS_DIR="${EXPERIMENT_DIR}/optimization"
 export EXPERIMENT_DIR
+export OPTUNA_RESULTS_DIR
+export PINN_STUDY_NAME="${PINN_STUDY_NAME:-pinn_${DATASET_NAME}_optimization}"
 
 # PINN-specific knobs (defaults live in src/settings.py; export overrides).
 export PINN_CHECKPOINT_NAME="${PINN_CHECKPOINT_NAME:-pinn_gow17.ckpt}"
@@ -74,6 +77,9 @@ print_config_summary() {
     echo "LS_DATA_DIR=${LS_DATA_DIR}"
     echo "RESULTS_ROOT=${RESULTS_ROOT:-${PINN_DIR}/results}"
     echo "EXPERIMENT_DIR=${EXPERIMENT_DIR}"
+    echo "OPTUNA_RESULTS_DIR=${OPTUNA_RESULTS_DIR}"
+    echo "PINN_STUDY_NAME=${PINN_STUDY_NAME}"
+    echo "JOURNAL_MODE=${JOURNAL_MODE}"
     echo "CONDA_ENV=${CONDA_ENV}"
     echo "ACCELERATOR=${ACCELERATOR}"
     echo "DEVICES=${DEVICES}"

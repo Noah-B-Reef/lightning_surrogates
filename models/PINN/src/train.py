@@ -55,6 +55,29 @@ def default_config():
     }
 
 
+def load_best_config(config_file):
+    """Load hyperparameters from optimize.py's best_params.json.
+
+    Architecture/training keys are required; the loss weights
+    (physics_weight, conservation_weight) are optional so the file can also
+    come from the MLP-style optimizer or be hand-written.
+    """
+    path = Path(config_file).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    payload = json.loads(path.read_text())
+    best = {
+        "num_hidden_layers": int(payload["num_hidden_layers"]),
+        "num_neurons_per_hidden_layer": int(payload["num_neurons_per_hidden_layer"]),
+        "learning_rate": float(payload["learning_rate"]),
+        "batch_size": int(payload["batch_size"]),
+    }
+    for key in ("physics_weight", "conservation_weight"):
+        if key in payload:
+            best[key] = float(payload[key])
+    return best
+
+
 def plot_history(history, output_path):
     output_path = Path(output_path)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -245,6 +268,13 @@ def main():
     parser.add_argument("dataset_path", nargs="?", default=None)
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument(
+        "--config-file",
+        type=Path,
+        default=None,
+        help="best_params.json from optimize.py; overrides the architecture/"
+        "training flags (and the loss-weight flags when present in the file).",
+    )
     parser.add_argument("--checkpoint", type=str, default=config.CHECKPOINT_NAME)
     parser.add_argument(
         "--results-dir",
@@ -278,12 +308,15 @@ def main():
     parser.add_argument("--no-early-stopping", action="store_true")
     args = parser.parse_args()
 
-    best_config = {
-        "num_hidden_layers": args.num_layers,
-        "num_neurons_per_hidden_layer": args.hidden_units,
-        "learning_rate": args.learning_rate,
-        "batch_size": args.batch_size,
-    }
+    if args.config_file is not None:
+        best_config = load_best_config(args.config_file)
+    else:
+        best_config = {
+            "num_hidden_layers": args.num_layers,
+            "num_neurons_per_hidden_layer": args.hidden_units,
+            "learning_rate": args.learning_rate,
+            "batch_size": args.batch_size,
+        }
     return train_final_model(
         best_config,
         args.data_dir or args.dataset_path,
@@ -294,8 +327,10 @@ def main():
         devices=args.devices,
         precision=args.precision,
         num_workers=args.num_workers,
-        physics_weight=args.physics_weight,
-        conservation_weight=args.conservation_weight,
+        physics_weight=best_config.get("physics_weight", args.physics_weight),
+        conservation_weight=best_config.get(
+            "conservation_weight", args.conservation_weight
+        ),
         max_horizon=args.max_horizon,
         early_stopping=not args.no_early_stopping,
         early_stopping_patience=args.early_stopping_patience,

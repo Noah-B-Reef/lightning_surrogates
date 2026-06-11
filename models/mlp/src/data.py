@@ -93,7 +93,9 @@ class GravCollapseDataset(Dataset):
 
         self._phys = df[phys_cols].to_numpy(dtype=np.float32)
         abund = df[abundance_cols].to_numpy(dtype=np.float32)
-        self._abund = np.log10(np.maximum(abund, 1e-30)).astype(np.float32, copy=False)
+        self._abund = np.log10(np.maximum(abund, config.ABUND_FLOOR)).astype(
+            np.float32, copy=False
+        )
 
         # Sample index: every row with a successor row of the same tracer.
         starts = []

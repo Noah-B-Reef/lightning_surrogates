@@ -167,6 +167,8 @@ def train_final_model(
         "learning_rate": learning_rate,
         "loss_function": loss_function,
         "seed": int(seed),
+        "trace_threshold_log10": config.TRACE_THRESHOLD_LOG10,
+        "trace_weight": config.TRACE_WEIGHT,
         **data.phys_norm_config(),
     }
     model = MLP(model_config)

@@ -8,6 +8,7 @@ match the standard layout (raw data and splits in the sibling ``datasets/``
 directory). This module performs no config-file parsing of its own.
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def resolve_path(path):
 
 # Default paths (resolved relative to the workspace unless set in the environment)
 DEFAULT_DATASETS_DIR = env_path("DATASETS_DIR", RESEARCH_DIR / "datasets")
-DATASET_NAME = env_str("DATASET_NAME", "grav_collapse")
+DATASET_NAME = env_str("DATASET_NAME", "gow17_R0.05_M6.0")
 DEFAULT_SAMPLED_DATASETS_DIR = env_path(
     "SAMPLED_DATASETS_DIR",
     DEFAULT_DATASETS_DIR / "sampled_datasets",
@@ -66,7 +67,7 @@ DEFAULT_SPLIT_DIR = env_path(
 # Experiment results live inside this model's directory:
 # models/mlp/results/{dataset name}/{sampler}/.
 DEFAULT_RESULTS_ROOT = env_path("RESULTS_ROOT", MLP_DIR / "results")
-CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", "mlp_grav_collapse.ckpt")
+CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", f"mlp_{DATASET_NAME}.ckpt")
 
 
 def experiment_relpath(split_dir):
@@ -126,6 +127,17 @@ LOSS_FUNCTION = env_str("MODEL_LOSS_FUNCTION", "l1")  # l1 | mse | smooth_l1
 EPOCHS = env_int("TRAIN_EPOCHS", env_int("MODEL_EPOCHS", 100))
 NUM_WORKERS = env_num_workers()
 
+# Trace-species loss handling. Raw abundances are clipped at ABUND_FLOOR
+# before the log10 transform (the old hardcoded floor was 1e-30, which pinned
+# unresolved trace species at log10 = -30 and let their noise dominate the
+# loss). Targets at or below TRACE_THRESHOLD are downweighted by TRACE_WEIGHT
+# in the training loss: they carry no physical signal worth fitting at the
+# expense of the dynamically important species.
+ABUND_FLOOR = env_float("MODEL_ABUND_FLOOR", 1e-25)
+TRACE_THRESHOLD = env_float("MODEL_TRACE_THRESHOLD", 1e-20)
+TRACE_THRESHOLD_LOG10 = math.log10(TRACE_THRESHOLD)
+TRACE_WEIGHT = env_float("MODEL_TRACE_WEIGHT", 0.1)
+
 # Compute parameters
 ACCELERATOR = env_str("ACCELERATOR", "auto")
 NUM_DEVICES = env_str("DEVICES", "1")  # Keep as string since devices can be list/str
@@ -140,7 +152,7 @@ EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT = env_float(
 # Optimization parameters (sequential Optuna study)
 OPTUNA_N_TRIALS = env_int("N_TRIALS", 25)
 OPTUNA_TUNE_EPOCHS = env_int("TUNE_EPOCHS", 50)
-OPTUNA_STUDY_NAME = env_str("STUDY_NAME", "mlp_grav_collapse_optimization")
+OPTUNA_STUDY_NAME = env_str("STUDY_NAME", f"mlp_{DATASET_NAME}_optimization")
 OPTUNA_STORAGE = env_str("OPTUNA_STORAGE", "auto")
 OPTUNA_JOURNAL_MODE = env_str("JOURNAL_MODE", "resume")
 OPTUNA_PRUNER_PATIENCE = env_int("PRUNER_PATIENCE", 8)
@@ -149,10 +161,12 @@ OPTUNA_MIN_RELATIVE_IMPROVEMENT = env_float("MIN_RELATIVE_IMPROVEMENT", 0.02)
 # Search space for hyperparameter tuning. The training loss function is fixed
 # to LOSS_FUNCTION; Optuna's objective is val_mse (a fixed metric).
 OPTUNA_SEARCH_SPACE = {
-    "num_layers": {"type": "int", "low": 2, "high": 5},
-    "hidden_units": {"type": "int", "low": 128, "high": 512, "step": 128},
-    "learning_rate": {"type": "float", "low": 1e-4, "high": 5e-3, "log": True},
-    "batch_size": {"type": "categorical", "choices": [32, 64, 128]},
+    "num_layers": {"type": "int", "low": 2, "high": 8},
+    "hidden_units": {"type": "int", "low": 128, "high": 1024, "step": 128},
+    "learning_rate": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True},
+    # Small batches (32-128) made the val loss extremely noisy on the 4M+
+    # sample splits; large batches stabilize it and train far faster per epoch.
+    "batch_size": {"type": "categorical", "choices": [256, 512, 1024, 2048]},
 }
 
 # Test settings
