@@ -100,7 +100,11 @@ export N_TRIALS=25
 export TUNE_EPOCHS=50
 export STUDY_NAME="${STUDY_NAME:-mlp_${DATASET_NAME}_optimization}"
 export OPTUNA_STORAGE="auto"                 # auto = sqlite in the optimization results dir
-export JOURNAL_MODE="resume"                 # resume | fresh
+# fresh by default: each pipeline run wipes the Optuna journal and re-runs
+# all trials, so config changes (search space, loss, scheduler) actually
+# take effect instead of silently reusing a stale study. Override with
+# JOURNAL_MODE=resume to continue an interrupted optimization.
+export JOURNAL_MODE="${JOURNAL_MODE:-fresh}"  # resume | fresh
 export PRUNER_PATIENCE=8
 export MIN_RELATIVE_IMPROVEMENT=0.02
 
