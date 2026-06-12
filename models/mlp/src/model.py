@@ -31,6 +31,14 @@ class MLP(pl.LightningModule):
         output_size = int(config["output_size"])
         self.learning_rate = float(config.get("learning_rate", 1e-3))
         self.loss_function = str(config.get("loss_function", "l1"))
+        # LR schedule: "none" | "cosine" | "plateau". L1/Huber losses have a
+        # non-vanishing gradient near the optimum, so a fixed LR makes the
+        # weights dither at step size ~lr forever — visible as a noisy
+        # validation curve. Decaying the LR lets the optimizer settle.
+        self.lr_scheduler = str(config.get("lr_scheduler", "none"))
+        self.lr_min = float(config.get("lr_min", 1e-6))
+        self.lr_plateau_factor = float(config.get("lr_plateau_factor", 0.5))
+        self.lr_plateau_patience = int(config.get("lr_plateau_patience", 3))
         # Trace-species downweighting: loss elements whose target log10
         # abundance is at or below trace_threshold_log10 are scaled by
         # trace_weight (1.0 disables). Defaults keep old checkpoints loadable.
@@ -130,4 +138,29 @@ class MLP(pl.LightningModule):
         return self._step(batch, "test")
 
     def configure_optimizers(self):
-        return optim.AdamW(self.parameters(), lr=self.learning_rate)
+        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate)
+        if self.lr_scheduler == "none":
+            return optimizer
+        if self.lr_scheduler == "cosine":
+            # Anneal over the full run; T_max comes from the trainer.
+            t_max = getattr(self.trainer, "max_epochs", None) or 100
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=int(t_max), eta_min=self.lr_min
+            )
+            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler}}
+        if self.lr_scheduler == "plateau":
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                factor=self.lr_plateau_factor,
+                patience=self.lr_plateau_patience,
+                min_lr=self.lr_min,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"},
+            }
+        raise ValueError(
+            f"lr_scheduler must be 'none', 'cosine', or 'plateau', "
+            f"got {self.lr_scheduler!r}"
+        )

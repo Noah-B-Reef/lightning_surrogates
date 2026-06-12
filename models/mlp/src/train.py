@@ -169,6 +169,10 @@ def train_final_model(
         "seed": int(seed),
         "trace_threshold_log10": config.TRACE_THRESHOLD_LOG10,
         "trace_weight": config.TRACE_WEIGHT,
+        "lr_scheduler": config.LR_SCHEDULER,
+        "lr_min": config.LR_MIN,
+        "lr_plateau_factor": config.LR_PLATEAU_FACTOR,
+        "lr_plateau_patience": config.LR_PLATEAU_PATIENCE,
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
@@ -211,6 +215,7 @@ def train_final_model(
                 min_relative_improvement=early_stopping_min_relative_improvement,
                 patience=early_stopping_patience,
                 mode="min",
+                ema_alpha=config.EARLY_STOPPING_EMA_ALPHA,
             ),
         )
 

@@ -138,6 +138,14 @@ TRACE_THRESHOLD = env_float("MODEL_TRACE_THRESHOLD", 1e-20)
 TRACE_THRESHOLD_LOG10 = math.log10(TRACE_THRESHOLD)
 TRACE_WEIGHT = env_float("MODEL_TRACE_WEIGHT", 0.1)
 
+# Learning-rate schedule: none | cosine | plateau. L1/Huber losses keep a
+# constant-magnitude gradient at the optimum, so a fixed LR leaves the
+# weights dithering (noisy validation curve); decaying the LR settles them.
+LR_SCHEDULER = env_str("MODEL_LR_SCHEDULER", "cosine")  # none | cosine | plateau
+LR_MIN = env_float("MODEL_LR_MIN", 1e-6)
+LR_PLATEAU_FACTOR = env_float("MODEL_LR_PLATEAU_FACTOR", 0.5)
+LR_PLATEAU_PATIENCE = env_int("MODEL_LR_PLATEAU_PATIENCE", 3)
+
 # Compute parameters
 ACCELERATOR = env_str("ACCELERATOR", "auto")
 NUM_DEVICES = env_str("DEVICES", "1")  # Keep as string since devices can be list/str
@@ -147,6 +155,13 @@ PRECISION = env_str("PRECISION", "32")  # Keep as string/int
 EARLY_STOPPING_PATIENCE = env_int("EARLY_STOPPING_PATIENCE", 8)
 EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT = env_float(
     "EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT", 0.02
+)
+# EMA smoothing factor for the early-stopping decision (None disables). A
+# noisy val curve can trip patience on a single epoch; smoothing the stop
+# signal decouples it from that jitter. Empty/<=0 -> disabled.
+_ema = os.environ.get("EARLY_STOPPING_EMA_ALPHA", "0.3").strip()
+EARLY_STOPPING_EMA_ALPHA = (
+    float(_ema) if _ema and float(_ema) > 0.0 else None
 )
 
 # Optimization parameters (sequential Optuna study)

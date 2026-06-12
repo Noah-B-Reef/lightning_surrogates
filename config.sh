@@ -71,8 +71,19 @@ export MODEL_NUM_LAYERS=3
 export MODEL_HIDDEN_UNITS=256
 export MODEL_BATCH_SIZE=1024
 export MODEL_LEARNING_RATE=1e-3
-export MODEL_LOSS_FUNCTION="${MODEL_LOSS_FUNCTION:-l1}"   # l1 | mse | smooth_l1
+# smooth_l1 (Huber) keeps L1's robustness to the stiff outlier transitions
+# but its gradient vanishes near the optimum, so the optimizer settles
+# instead of dithering (smoother validation curve than plain l1).
+export MODEL_LOSS_FUNCTION="${MODEL_LOSS_FUNCTION:-smooth_l1}"   # l1 | mse | smooth_l1
 export CHECKPOINT_NAME="${CHECKPOINT_NAME:-mlp_${DATASET_NAME}.ckpt}"
+
+# Learning-rate schedule. A fixed LR with L1/Huber loss leaves the weights
+# dithering at step size ~lr (noisy val curve); cosine annealing decays it
+# to settle. Options: none | cosine | plateau.
+export MODEL_LR_SCHEDULER="${MODEL_LR_SCHEDULER:-cosine}"
+export MODEL_LR_MIN="${MODEL_LR_MIN:-1e-6}"
+export MODEL_LR_PLATEAU_FACTOR="${MODEL_LR_PLATEAU_FACTOR:-0.5}"
+export MODEL_LR_PLATEAU_PATIENCE="${MODEL_LR_PLATEAU_PATIENCE:-3}"
 
 # Trace-species loss handling (MLP). Abundances are clipped at
 # MODEL_ABUND_FLOOR before the log10 transform; targets at or below
@@ -99,6 +110,9 @@ export MIN_RELATIVE_IMPROVEMENT=0.02
 export TRAIN_EPOCHS=100
 export EARLY_STOPPING_PATIENCE=8
 export EARLY_STOPPING_MIN_RELATIVE_IMPROVEMENT=0.02
+# EMA smoothing of the early-stopping signal (empty or <=0 disables). Stops
+# the noisy val curve from tripping patience on a single unlucky epoch.
+export EARLY_STOPPING_EMA_ALPHA="${EARLY_STOPPING_EMA_ALPHA:-0.3}"
 
 # ---------------------------------------------------------------------------
 # Testing

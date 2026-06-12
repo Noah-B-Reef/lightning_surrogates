@@ -42,6 +42,7 @@ class RelativeImprovementEarlyStopping(pl.Callback):
         patience=8,
         mode="min",
         verbose=True,
+        ema_alpha=None,
     ):
         super().__init__()
         if mode not in {"min", "max"}:
@@ -51,15 +52,26 @@ class RelativeImprovementEarlyStopping(pl.Callback):
         self.patience = patience
         self.mode = mode
         self.verbose = verbose
+        # When set (0, 1], the stop decision tracks an exponential moving
+        # average of the monitored metric instead of its raw per-epoch value.
+        # A noisy validation curve can otherwise trip patience on a single
+        # unlucky epoch; smoothing decouples the stop time from that jitter.
+        self.ema_alpha = None if ema_alpha is None else float(ema_alpha)
         self.best_score = None
         self.wait_count = 0
+        self.ema = None
 
     def state_dict(self):
-        return {"best_score": self.best_score, "wait_count": self.wait_count}
+        return {
+            "best_score": self.best_score,
+            "wait_count": self.wait_count,
+            "ema": self.ema,
+        }
 
     def load_state_dict(self, state_dict):
         self.best_score = state_dict.get("best_score")
         self.wait_count = state_dict.get("wait_count", 0)
+        self.ema = state_dict.get("ema")
 
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.sanity_checking:
@@ -72,6 +84,14 @@ class RelativeImprovementEarlyStopping(pl.Callback):
             if not torch.isfinite(current):
                 return
             current = current.item()
+
+        if self.ema_alpha is not None:
+            self.ema = (
+                current
+                if self.ema is None
+                else self.ema_alpha * current + (1.0 - self.ema_alpha) * self.ema
+            )
+            current = self.ema
 
         if self.best_score is None:
             self.best_score = current

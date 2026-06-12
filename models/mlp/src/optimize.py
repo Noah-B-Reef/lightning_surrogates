@@ -76,6 +76,10 @@ def objective(trial, args, split_dir):
         "loss_function": params["loss_function"],
         "trace_threshold_log10": config.TRACE_THRESHOLD_LOG10,
         "trace_weight": config.TRACE_WEIGHT,
+        "lr_scheduler": config.LR_SCHEDULER,
+        "lr_min": config.LR_MIN,
+        "lr_plateau_factor": config.LR_PLATEAU_FACTOR,
+        "lr_plateau_patience": config.LR_PLATEAU_PATIENCE,
         **data.phys_norm_config(),
     }
     model = MLP(model_config)
