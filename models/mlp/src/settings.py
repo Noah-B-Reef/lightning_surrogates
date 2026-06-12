@@ -138,6 +138,19 @@ TRACE_THRESHOLD = env_float("MODEL_TRACE_THRESHOLD", 1e-20)
 TRACE_THRESHOLD_LOG10 = math.log10(TRACE_THRESHOLD)
 TRACE_WEIGHT = env_float("MODEL_TRACE_WEIGHT", 0.1)
 
+# Multi-step rollout training. Each sample is a window of ROLLOUT_STEPS
+# consecutive transitions; during the loss the model is fed its own
+# predictions autoregressively (true physical drivers, predicted abundances),
+# so it trains on the error distribution it will face at rollout time. Step
+# j (0-based) is weighted by ROLLOUT_DECAY_BASE**j. The training horizon
+# follows a doubling curriculum (1, 2, 4, ... up to ROLLOUT_STEPS), advancing
+# every ROLLOUT_CURRICULUM_EPOCHS epochs; validation always uses the full
+# horizon so val_loss keeps a fixed definition across epochs.
+# ROLLOUT_STEPS=1 reproduces the old one-step training exactly.
+ROLLOUT_STEPS = env_int("MODEL_ROLLOUT_STEPS", 10)
+ROLLOUT_DECAY_BASE = env_float("MODEL_ROLLOUT_DECAY_BASE", 0.5)
+ROLLOUT_CURRICULUM_EPOCHS = env_int("MODEL_ROLLOUT_CURRICULUM_EPOCHS", 5)
+
 # Learning-rate schedule: none | cosine | plateau. L1/Huber losses keep a
 # constant-magnitude gradient at the optimum, so a fixed LR leaves the
 # weights dithering (noisy validation curve); decaying the LR settles them.

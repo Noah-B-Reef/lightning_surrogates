@@ -68,16 +68,20 @@ def load_split_dataframe(split_dir, split_name):
 
 class GravCollapseDataset(Dataset):
     """
-    One-step transition samples from a sampled split directory.
+    Rollout windows of ``rollout_steps`` consecutive transitions from a
+    sampled split directory. Each sample is
 
-    Input layout:
-        [physical parameters at t, log10 abundances at t]
+        phys_seq: [rollout_steps, num_phys]   physical drivers at t .. t+k-1
+        abund0:   [num_species]               log10 abundances at t
+        targets:  [rollout_steps, num_species] log10 abundances at t+1 .. t+k
 
-    Target layout:
-        log10 abundances at t + 1
+    The model consumes the true drivers at every step but feeds its own
+    abundance predictions forward, so windows must be contiguous within a
+    single tracer. ``rollout_steps=1`` reproduces the old one-step samples.
     """
 
-    def __init__(self, split_dir, split_name):
+    def __init__(self, split_dir, split_name, rollout_steps=1):
+        self._rollout_steps = max(1, int(rollout_steps))
         df = load_split_dataframe(split_dir, split_name)
         df = df.sort_values(["Tracer", "Time"]).reset_index(drop=True)
 
@@ -97,28 +101,39 @@ class GravCollapseDataset(Dataset):
             np.float32, copy=False
         )
 
-        # Sample index: every row with a successor row of the same tracer.
+        # Sample index: every row with rollout_steps successor rows of the
+        # same tracer (windows never cross a tracer boundary).
+        window = self._rollout_steps
         starts = []
         for _, row_indices in df.groupby("Tracer", sort=False).indices.items():
             num_steps = len(row_indices)
-            if num_steps <= 1:
+            if num_steps <= window:
                 continue
             first_row = int(row_indices[0])
-            starts.append(first_row + np.arange(num_steps - 1, dtype=np.int64))
+            starts.append(first_row + np.arange(num_steps - window, dtype=np.int64))
         self._sample_starts = (
             np.concatenate(starts) if starts else np.empty(0, dtype=np.int64)
         )
+        if len(self._sample_starts) == 0:
+            raise ValueError(
+                f"Split '{split_name}' has no tracer with more than "
+                f"{window} steps; cannot build rollout windows."
+            )
 
     def __len__(self):
         return len(self._sample_starts)
 
     def __getitem__(self, idx):
         start = self._sample_starts[idx]
-        inputs = np.concatenate([self._phys[start], self._abund[start]]).astype(
-            np.float32, copy=False
+        end = start + self._rollout_steps
+        phys_seq = self._phys[start:end]
+        abund0 = self._abund[start]
+        targets = self._abund[start + 1 : end + 1]
+        return (
+            torch.from_numpy(phys_seq),
+            torch.from_numpy(abund0),
+            torch.from_numpy(targets),
         )
-        target = self._abund[start + 1]
-        return torch.from_numpy(inputs), torch.from_numpy(target)
 
     def feature_names(self):
         return self._feature_names
@@ -179,19 +194,27 @@ class GravCollapseDataModule(pl.LightningDataModule):
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=False,
+        rollout_steps=config.ROLLOUT_STEPS,
     ):
         super().__init__()
         self.data_dir = str(data_dir)
         self.batch_size = int(batch_size)
         self.num_workers = int(num_workers)
         self.pin_memory = bool(pin_memory)
+        self.rollout_steps = max(1, int(rollout_steps))
 
     def setup(self, stage=None):
         if stage in (None, "fit"):
-            self.train_ds = GravCollapseDataset(self.data_dir, "train")
-            self.val_ds = GravCollapseDataset(self.data_dir, "val")
+            self.train_ds = GravCollapseDataset(
+                self.data_dir, "train", rollout_steps=self.rollout_steps
+            )
+            self.val_ds = GravCollapseDataset(
+                self.data_dir, "val", rollout_steps=self.rollout_steps
+            )
         if stage in (None, "test", "predict"):
-            self.test_ds = GravCollapseDataset(self.data_dir, "test")
+            self.test_ds = GravCollapseDataset(
+                self.data_dir, "test", rollout_steps=self.rollout_steps
+            )
         schema_ds = getattr(self, "train_ds", None) or getattr(self, "test_ds", None)
         self._num_features = schema_ds.num_features
         self._num_targets = schema_ds.num_targets

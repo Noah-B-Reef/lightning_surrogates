@@ -19,6 +19,17 @@ class MLP(pl.LightningModule):
     Output: log10 abundances at t + 1
     Loss:   selectable via config["loss_function"] (l1 | mse | smooth_l1),
             always computed on the log10 abundances. Default: l1.
+
+    Training unrolls the model autoregressively for config["rollout_steps"]
+    steps: the true physical drivers are fed at every step, but the abundance
+    input from step 2 onward is the model's own prediction, with gradients
+    flowing through the whole chain. Step j (0-based) is weighted by
+    config["rollout_decay_base"]**j. The training horizon follows a doubling
+    curriculum (1, 2, 4, ... capped at rollout_steps), advancing every
+    config["rollout_curriculum_epochs"] epochs; validation and test always
+    use the full horizon so their loss keeps one definition across epochs.
+    rollout_steps=1 (the default, for old checkpoints) is exactly the old
+    one-step objective.
     """
 
     def __init__(self, config):
@@ -46,6 +57,13 @@ class MLP(pl.LightningModule):
             config.get("trace_threshold_log10", -float("inf"))
         )
         self.trace_weight = float(config.get("trace_weight", 1.0))
+        # Multi-step rollout training (see class docstring). Defaults keep
+        # old one-step checkpoints loadable and reproduce their objective.
+        self.rollout_steps = max(1, int(config.get("rollout_steps", 1)))
+        self.rollout_decay_base = float(config.get("rollout_decay_base", 0.5))
+        self.rollout_curriculum_epochs = int(
+            config.get("rollout_curriculum_epochs", 0)
+        )
         if self.loss_function not in LOSS_FUNCTIONS:
             raise ValueError(
                 f"loss_function must be one of {sorted(LOSS_FUNCTIONS)}, "
@@ -101,9 +119,7 @@ class MLP(pl.LightningModule):
     def forward(self, x):
         return self.network(self._normalize_phys(x))
 
-    def _step(self, batch, stage):
-        inputs, targets = batch
-        preds = self(inputs)
+    def _weighted_loss(self, preds, targets):
         if self.trace_weight != 1.0:
             elementwise = LOSS_FUNCTIONS[self.loss_function](
                 preds, targets, reduction="none"
@@ -113,11 +129,38 @@ class MLP(pl.LightningModule):
                 torch.as_tensor(self.trace_weight, device=targets.device),
                 torch.ones((), device=targets.device),
             )
-            loss = (elementwise * weights).sum() / weights.sum()
-        else:
-            loss = LOSS_FUNCTIONS[self.loss_function](preds, targets)
+            return (elementwise * weights).sum() / weights.sum()
+        return LOSS_FUNCTIONS[self.loss_function](preds, targets)
+
+    def _horizon(self, stage):
+        """Rollout horizon for this step. Training follows the doubling
+        curriculum; val/test always use the full horizon so their loss
+        keeps a single definition across epochs."""
+        if stage != "train" or self.rollout_curriculum_epochs <= 0:
+            return self.rollout_steps
+        return min(
+            self.rollout_steps,
+            2 ** (self.current_epoch // self.rollout_curriculum_epochs),
+        )
+
+    def _step(self, batch, stage):
+        phys_seq, abund, targets = batch
+        horizon = self._horizon(stage)
         metric = getattr(self, f"{stage}_mse")
-        metric(preds, targets)
+        loss = abund.new_zeros(())
+        weight_sum = 0.0
+        for j in range(horizon):
+            preds = self(torch.cat([phys_seq[:, j], abund], dim=1))
+            # The window slice is non-contiguous; torchmetrics needs .view().
+            step_targets = targets[:, j].contiguous()
+            step_weight = self.rollout_decay_base**j
+            loss = loss + step_weight * self._weighted_loss(preds, step_targets)
+            weight_sum += step_weight
+            metric(preds, step_targets)
+            abund = preds
+        loss = loss / weight_sum
+        if stage == "train":
+            self.log("train_rollout_k", float(horizon), on_step=False, on_epoch=True)
         self.log(
             f"{stage}_loss",
             loss,

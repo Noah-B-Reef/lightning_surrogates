@@ -65,6 +65,7 @@ def objective(trial, args, split_dir):
         data_dir=str(split_dir),
         batch_size=params["batch_size"],
         num_workers=args.num_workers,
+        rollout_steps=config.ROLLOUT_STEPS,
     )
     data.setup("fit")
     model_config = {
@@ -76,6 +77,9 @@ def objective(trial, args, split_dir):
         "loss_function": params["loss_function"],
         "trace_threshold_log10": config.TRACE_THRESHOLD_LOG10,
         "trace_weight": config.TRACE_WEIGHT,
+        "rollout_steps": config.ROLLOUT_STEPS,
+        "rollout_decay_base": config.ROLLOUT_DECAY_BASE,
+        "rollout_curriculum_epochs": config.ROLLOUT_CURRICULUM_EPOCHS,
         "lr_scheduler": config.LR_SCHEDULER,
         "lr_min": config.LR_MIN,
         "lr_plateau_factor": config.LR_PLATEAU_FACTOR,
