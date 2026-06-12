@@ -25,6 +25,8 @@ Caveats for the gow17_R0.05_M6.0 dataset:
     s^-1, i.e. zeta_column (1.2213740458) times 1.657e-17.
 """
 
+import os
+
 import torch
 
 from gow17_network import load_reactions, load_species, stoichiometry
@@ -122,10 +124,27 @@ class GOW17RHS(torch.nn.Module):
     normalizing residuals of stiff, quasi-equilibrium species.
     """
 
-    def __init__(self, Z_d=1.0, temp_min_rates=1.0):
+    def __init__(self, Z_d=1.0, temp_min_rates=1.0, ohx_formation_yield=None):
         super().__init__()
         self.Z_d = float(Z_d)
         self.temp_min_rates = float(temp_min_rates)
+        # Effective OHx yield of the O + H3+ / H2 + O+ formation channels
+        # (R21, R23), which run through the H2O+ -> H3O+ intermediate. The
+        # reduced network assumes essentially all of that flux ends as the
+        # lumped OHx (OH/H2O), but the dataset's full network recycles most
+        # of it back to O (H3O+ dissociative recombination branches to O+H2
+        # rather than OH/H2O). With yield = 1 the RHS overpredicts the OHx
+        # quasi-steady-state by ~1e5 at the dataset states (see
+        # validate_rhs.py --equilibrium); the default below is calibrated so
+        # the RHS OHx equilibrium matches the gow17_R0.05_M6.0 dataset
+        # (OHx reconstruction error 5e4 -> 0.4). It is an empirical match to
+        # the data, not a first-principles rate; set OHX_FORMATION_YIELD=1
+        # (or pass 1.0) to recover the original reduced-network rate.
+        if ohx_formation_yield is None:
+            ohx_formation_yield = float(
+                os.environ.get("OHX_FORMATION_YIELD", 1.0e-5)
+            )
+        self.ohx_formation_yield = float(ohx_formation_yield)
         self._idx = {s: i for i, s in enumerate(SPECIES)}
         nu = _stoichiometry_matrix()
         self.register_buffer("nu", nu)
@@ -195,10 +214,14 @@ class GOW17RHS(torch.nn.Module):
         h2o_ratio = 6e-10 * yH2 / torch.clamp(5.3e-6 / torch.sqrt(T) * ye, min=_TINY)
         fac_H2 = h2o_ratio / (h2o_ratio + 1.0)
         fac_e = 1.0 / (h2o_ratio + 1.0)
+        # OHx-forming branches (R21, R23) carry the empirical H3O+ -> OHx
+        # yield (see __init__); R22/R24 are the e- recombination branches
+        # back to O and are unaffected.
+        yld = self.ohx_formation_yield
         k_O_H3p = 1.99e-9 * T ** (-0.190)
-        R[21] = k_O_H3p * fac_H2 * nH * yO * yH3p
+        R[21] = yld * k_O_H3p * fac_H2 * nH * yO * yH3p
         R[22] = k_O_H3p * fac_e * nH * yO * yH3p
-        R[23] = 1.6e-9 * fac_H2 * nH * yH2 * yOp
+        R[23] = yld * 1.6e-9 * fac_H2 * nH * yH2 * yOp
         R[24] = 1.6e-9 * fac_e * nH * yH2 * yOp
 
         # --- two-body reactions (Kooij / ionpol1 from reactions.dat) ---
