@@ -93,6 +93,19 @@ export MODEL_ABUND_FLOOR="${MODEL_ABUND_FLOOR:-1e-25}"
 export MODEL_TRACE_THRESHOLD="${MODEL_TRACE_THRESHOLD:-1e-20}"
 export MODEL_TRACE_WEIGHT="${MODEL_TRACE_WEIGHT:-0.1}"
 
+# xLSTM-specific knobs (models/xlstm). The xLSTM surrogate keeps the shared
+# [phys, abund] -> abund_{t+1} interface and rollout/trace/LR settings above,
+# but its recurrent core is a stack of xLSTM blocks (Beck et al. 2024). CELL_TYPE
+# selects the block kind: slstm (scalar memory + exponential gating + memory
+# mixing), mlstm (matrix memory + covariance update), or mixed (alternating).
+# HIDDEN_DIM must be divisible by NUM_HEADS. NUM_BLOCKS/HIDDEN_DIM are also the
+# Optuna search axes; CELL_TYPE and NUM_HEADS are fixed per study.
+export MODEL_XLSTM_CELL_TYPE="${MODEL_XLSTM_CELL_TYPE:-slstm}"   # slstm | mlstm | mixed
+export MODEL_XLSTM_NUM_BLOCKS="${MODEL_XLSTM_NUM_BLOCKS:-2}"
+export MODEL_XLSTM_HIDDEN_DIM="${MODEL_XLSTM_HIDDEN_DIM:-256}"
+export MODEL_XLSTM_NUM_HEADS="${MODEL_XLSTM_NUM_HEADS:-4}"
+export MODEL_XLSTM_DROPOUT="${MODEL_XLSTM_DROPOUT:-0.0}"
+
 # ---------------------------------------------------------------------------
 # Hyperparameter optimization (sequential Optuna study)
 # ---------------------------------------------------------------------------
