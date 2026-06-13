@@ -29,6 +29,11 @@ where $f_\theta$ is a plain MLP and $\tilde p_t$ is the normalized physical
 state. Applied recursively from an initial condition, the map reproduces a
 full chemical trajectory given only the physical history.
 
+The default dataset is the GOW17 chemistry network
+(`DATASET_NAME=gow17_R0.05_M6.0`); the MLP and the
+[PINN variant](#pinn-physics-informed-variant) train on the same sampled
+splits so their results are directly comparable.
+
 ## Pipeline summary
 
 ```
@@ -92,23 +97,28 @@ $$\tilde p = \frac{\phi(p) - \mu_{\text{train}}}{\sigma_{\text{train}}}, \qquad
 
 **4. Model and loss.** $f_\theta$ is a feed-forward MLP (Linear + ReLU
 stacks; depth/width set by Optuna) with 337 inputs
-$[\tilde p_t, a_t]$ and 333 outputs $a_{t+1}$, trained with **L1 loss on the
-log abundances**:
+$[\tilde p_t, a_t]$ and 333 outputs $a_{t+1}$, trained on the log abundances
+with a robust per-element loss:
 
-$$\mathcal{L}(\theta) = \mathbb{E}_{(t,i)} \big\| f_\theta([\tilde p_t^i, a_t^i]) - a_{t+1}^i \big\|_1$$
+$$\mathcal{L}(\theta) = \mathbb{E}_{(t,i)} \big\| f_\theta([\tilde p_t^i, a_t^i]) - a_{t+1}^i \big\|$$
 
-L1 in $\log_{10}$ space means the loss is the mean absolute error **in dex**,
-weighting a factor-of-ten error equally for abundant and trace species.
-Optimizer: AdamW with gradient clipping; early stopping when validation loss
-stops improving by a relative threshold.
+The default loss is **smooth-L1 (Huber)** (`MODEL_LOSS_FUNCTION`; `l1`, `mse`,
+and `smooth_l1` are the options). L1/Huber in $\log_{10}$ space is the mean
+absolute error **in dex**, weighting a factor-of-ten error equally for abundant
+and trace species; Huber's vanishing gradient near the optimum settles the
+weights instead of dithering (smoother val curve than plain L1). Optimizer:
+AdamW with gradient clipping and a cosine learning-rate schedule
+(`MODEL_LR_SCHEDULER`); early stopping when validation loss stops improving by a
+relative threshold.
 
 **5. Hyperparameter search.** A sequential Optuna study (TPE sampler, median
-pruner) searches hidden layers (2–5), hidden units (128–512), learning rate
-($10^{-4}$–$5\times10^{-3}$, log scale), batch size (32/64/128), and the
-training loss function (L1 / MSE / smooth-L1 on the log abundances). The
-objective is validation MSE — a fixed metric, so trials trained with
-different losses remain comparable. The journal is a SQLite file, so
-interrupted studies resume.
+pruner) searches hidden layers (2–8), hidden units (128–1024, step 128),
+learning rate ($10^{-5}$–$10^{-2}$, log scale), and batch size
+(256/512/1024/2048). The loss function is **not** tuned — it is fixed to
+`MODEL_LOSS_FUNCTION` so trials are comparable; the objective is validation
+MSE (a fixed metric independent of the chosen loss). The journal is a SQLite
+file. By default `JOURNAL_MODE=fresh` wipes it each run so config changes take
+effect; set `JOURNAL_MODE=resume` to continue an interrupted study.
 
 **6. Evaluation.** `test.py` runs the *autoregressive* rollout — the regime
 that matters in production, where errors compound:
@@ -119,11 +129,28 @@ using the true physical history $p_t$ and only the initial abundances. It
 reports per-tracer and per-species MSE in $\log_{10}$ space and plots
 best/worst rollouts for a panel of key species.
 
+### Implementation notes
+
+- **Multi-step rollout training.** Beyond the one-step loss, training unrolls
+  the model over short windows of consecutive steps and weights each step-$j$
+  error by $0.5^{\,j}$, with a curriculum that grows the horizon
+  ($1\to2\to4\dots$) as training proceeds — so the network is penalized for the
+  error compounding it will face at rollout, not just single-step accuracy.
+- **Trace-species handling.** Abundances are clipped at `MODEL_ABUND_FLOOR`
+  ($10^{-25}$) before the $\log_{10}$ transform, and targets at or below
+  `MODEL_TRACE_THRESHOLD` ($10^{-20}$) are downweighted by `MODEL_TRACE_WEIGHT`
+  ($0.1$) so unresolved trace species stop dominating the dex loss (set the
+  weight to 1 to disable).
+- **Optuna journal.** `JOURNAL_MODE=fresh` (default) re-runs all trials so
+  search-space/config edits take effect; `resume` continues an interrupted
+  study.
+
 ## File structure
 
 ```
 lightning_surrogates/
 ├── config.sh                  # single config: all paths + args for every stage
+├── agent-orchestrator.yaml    # dev agent rules + runtime settings
 ├── samplers/
 │   ├── flatten_dataset.py     # raw HDF5 → flattened trajectory bundle
 │   ├── samplers.py            # random / density / qr_pivot / svd_fps / similarity
@@ -145,9 +172,19 @@ lightning_surrogates/
 │   │   └── callbacks.py       # epoch printer, relative-improvement early stop
 │   ├── slurm/                 # common.sh + optimize/train/test/pipeline jobs
 │   └── results/               # {dataset}/{sampler}/ experiment outputs (gitignored)
+├── models/PINN/               # physics-informed variant (see its own README.md)
+│   ├── README.md              # PINN model, loss, RHS, zeta calibration
+│   ├── src/                   # settings/data/model/optimize/train/test
+│   │   ├── gow17_network.py   # parse network/*.dat → ODE listing
+│   │   ├── gow17_rates.py     # differentiable torch RHS (50 reactions)
+│   │   └── validate_rhs.py    # RHS vs finite-diff check, zeta calibration
+│   ├── network/{species,reactions}.dat  # GOW17 network (54 species, 50 rxns)
+│   ├── GOW17_ODES.txt         # full ODE listing (reference)
+│   ├── slurm/                 # optimize/train/test/pipeline jobs
+│   └── results/               # {dataset}/{sampler}/pinn/ (at repo-root results/)
 
 ../datasets/                                    # sibling of this repo
-├── grav_collapse/baseline/*.h5                 # raw postprocessed chemistry
+├── mbon_impl/GOW2017_network/*.h5              # raw postprocessed chemistry
 └── sampled_datasets/{dataset}/{sampler}/{fmt}/ # train/val/test splits
 ```
 
@@ -181,7 +218,7 @@ cd ../models/mlp/src
 python optimize.py
 
 # 3. Train with the best parameters  →  models/mlp/results/{dataset}/{sampler}/
-python train.py --config-file ../results/grav_collapse/density/optimization/best_params.json
+python train.py --config-file ../results/gow17_R0.05_M6.0/density/optimization/best_params.json
 #    (or quick run with config defaults: python train.py --use-defaults)
 
 # 4. Rollout evaluation  →  models/mlp/results/{dataset}/{sampler}/test_results/
@@ -207,3 +244,63 @@ sbatch --export=ALL,DATASET_NAME=my_dataset,SAMPLERS_RAW_H5=/path/to/file.h5 slu
 
 The SLURM scripts source `config.sh` through `slurm/common.sh`; job logs go
 to `logs/` in the submit directory.
+
+## PINN: physics-informed variant
+
+`models/PINN/` is a second surrogate for the same GOW17 data, sharing the
+sampler splits, normalization, and Optuna/SLURM machinery as the MLP but adding
+two things: **elapsed time $\Delta t$ is a model input**, and the **chemical ODE
+system enters the loss as a physics residual**. Its own
+[`models/PINN/README.md`](models/PINN/README.md) carries the full derivation,
+the conservation laws, and the RHS-validation findings; this is the summary.
+
+**Model.** A hard initial-condition ansatz makes $\hat a(0)=a_0$ exact:
+
+$$\hat a(\Delta t) = a_0 + \tfrac{\Delta t}{t_{\text{ref}}}\,
+g_\theta\big([\tilde p,\; a_0,\; \tfrac{\Delta t}{t_{\text{ref}}}]\big)$$
+
+Training pairs span $1..$`PINN_MAX_HORIZON` (default 4) consecutive snapshots, so
+the network sees $\Delta t \in \{253, 506, 759, 1012\}$ yr — making time a real
+input rather than a fixed step ($t_{\text{ref}}=$ `PINN_DT_REF_YEARS`).
+
+**Loss.** Data L1 (dex error, as in the MLP), plus a physics term and a
+conservation term:
+
+$$\mathcal{L} = \mathcal{L}_{\text{data}}
++ w_{\text{phys}}\,\mathbb{E}\,|r|
++ w_{\text{cons}}\,\mathbb{E}\,|\text{invariant drift}|$$
+
+with `PINN_PHYSICS_WEIGHT` ($0.1$) and `PINN_CONSERVATION_WEIGHT` ($0.01$). The
+residual $r$ compares the autograd time-derivative of the prediction (double-vjp,
+one collocation $\tau$ per sample, random in $(0,\Delta t]$ by default) against
+the GOW17 RHS, symmetrically normalized by production + destruction so
+$|r|\le 1$ per species — necessary because the network is stiff. Conservation is
+measured on 6 linear invariants (charge + elemental H/He/C/O/Si). The objective
+for Optuna is still `val_mse` (loss-weight-independent), and the search space
+additionally tunes `physics_weight` and `conservation_weight`.
+
+**Chemistry RHS.** `gow17_network.py` parses
+`network/{species,reactions}.dat` (54 species, 50 reactions) into stoichiometry;
+`gow17_rates.py` is the differentiable torch RHS (two-body, cosmic-ray, photo,
+grain-assisted), with `R @ νᵀ` conserving the invariants to machine precision.
+`validate_rhs.py` checks the RHS against finite-difference $da/dt$ from the data
+and calibrates the cosmic-ray ionization unit from the H₂⁺ quasi-steady-state
+balance ($\zeta_{\text{phys}} = 2.024\times10^{-17}\,\text{s}^{-1}$;
+`PINN_ZETA_UNIT` default $1.657\times10^{-17}$).
+
+**Run it** (same CLI shape as the MLP; results go to
+`results/{dataset}/{sampler}/pinn/` at the repo root, *not* under
+`models/PINN/`):
+
+```bash
+source config.sh
+cd models/PINN/src
+python validate_rhs.py        # optional: RHS / zeta sanity check vs the data
+python optimize.py            # → optimization/best_params.json
+python train.py --config-file <best_params.json>
+python test.py --rollout-stride 1   # k-snapshot jumps exercise the Δt input
+```
+
+SLURM mirrors the MLP: `models/PINN/slurm/{optimize,train,test,pipeline}.slurm`.
+Note the PINN Optuna study defaults to `JOURNAL_MODE=resume` (the MLP defaults to
+`fresh`).
