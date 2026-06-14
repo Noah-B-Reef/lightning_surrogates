@@ -9,7 +9,7 @@ import torch
 
 import settings as config
 from data import PHYS_COLS, EXCLUDED_COLS, load_split_dataframe
-from model import RNN
+from model import LSTM
 
 
 DEFAULT_SPECIES = ["H", "H2", "O", "C", "N", "CL", "E_minus", "CO", "MG", "#C", "H2O", "SI"]
@@ -117,7 +117,7 @@ def main(
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = RNN.load_from_checkpoint(str(Path(model_checkpoint).expanduser().resolve()))
+    model = LSTM.load_from_checkpoint(str(Path(model_checkpoint).expanduser().resolve()))
     device = resolve_device(accelerator)
     model.to(device)
 
@@ -194,7 +194,7 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate an RNN checkpoint with autoregressive rollout.")
+    parser = argparse.ArgumentParser(description="Evaluate an LSTM checkpoint with autoregressive rollout.")
     parser.add_argument("dataset_path", nargs="?", default=None, help="Split directory containing the test split.")
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument(

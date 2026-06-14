@@ -29,8 +29,8 @@ LS_DATA_DIR="${SAMPLERS_DATA_DIR}/${SAMPLING_PROCEDURE}/${STORAGE_FORMAT}"
 export LS_DATA_DIR
 
 # Array index -> model directory. Keep this order stable: benchmark.slurm uses
-# #SBATCH --array=0-4 to map SLURM_ARRAY_TASK_ID onto these entries.
-MODELS=(t_1_mlp t_20_mlp lstm xlstm rnn)
+# #SBATCH --array=0-3 to map SLURM_ARRAY_TASK_ID onto these entries.
+MODELS=(t_1_mlp t_20_mlp lstm xlstm)
 
 if [ "${CONFIG_NUM_WORKERS:-auto}" = "auto" ]; then
     NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-0}}"

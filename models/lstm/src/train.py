@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import settings as config
 from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
-from model import RNN
+from model import LSTM
 
 
 class MetricsHistoryLogger(pl.Callback):
@@ -147,7 +147,7 @@ def train_final_model(
     learning_rate = float(best_config["learning_rate"])
     loss_function = str(best_config.get("loss_function", config.LOSS_FUNCTION))
 
-    log_dir = results_dir / "lightning_logs" / "rnn_grav_collapse"
+    log_dir = results_dir / "lightning_logs" / "lstm_grav_collapse"
     if log_dir.exists():
         shutil.rmtree(log_dir)
 
@@ -179,7 +179,7 @@ def train_final_model(
         "lr_plateau_patience": config.LR_PLATEAU_PATIENCE,
         **data.phys_norm_config(),
     }
-    model = RNN(model_config)
+    model = LSTM(model_config)
     num_parameters = sum(param.numel() for param in model.parameters())
 
     print(
@@ -211,7 +211,7 @@ def train_final_model(
         ModelCheckpoint(
             monitor="val_loss",
             dirpath=str(results_dir / "checkpoints"),
-            filename="rnn_best-{epoch:04d}-{val_loss:.5f}",
+            filename="lstm_best-{epoch:04d}-{val_loss:.5f}",
             save_top_k=1,
             mode="min",
         ),
@@ -238,7 +238,7 @@ def train_final_model(
         logger=(
             TensorBoardLogger(
                 save_dir=str(results_dir / "lightning_logs"),
-                name="rnn_grav_collapse",
+                name="lstm_grav_collapse",
             )
             if enable_logger
             else False
@@ -319,7 +319,7 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train the RNN on a split dataset directory.")
+    parser = argparse.ArgumentParser(description="Train the LSTM on a split dataset directory.")
     parser.add_argument("dataset_path", nargs="?", default=None)
     parser.add_argument("--data-dir", type=Path, default=None, help="Alias for dataset_path.")
     parser.add_argument("--epochs", type=int, default=None)

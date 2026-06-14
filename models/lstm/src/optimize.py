@@ -11,7 +11,7 @@ from optuna.trial import TrialState
 import settings as config
 from callbacks import EpochProgressPrinter, RelativeImprovementEarlyStopping
 from data import GravCollapseDataModule
-from model import RNN
+from model import LSTM
 
 
 TRAINING_PARAM_KEYS = (
@@ -88,7 +88,7 @@ def objective(trial, args, split_dir):
         "lr_plateau_patience": config.LR_PLATEAU_PATIENCE,
         **data.phys_norm_config(),
     }
-    model = RNN(model_config)
+    model = LSTM(model_config)
     num_parameters = sum(param.numel() for param in model.parameters())
 
     print(
@@ -220,7 +220,7 @@ def finished_trial_count(study):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Optimize RNN hyperparameters for a split dataset directory (sequential Optuna study)."
+        description="Optimize LSTM hyperparameters for a split dataset directory (sequential Optuna study)."
     )
     parser.add_argument(
         "dataset_path",

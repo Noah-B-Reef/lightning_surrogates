@@ -1,4 +1,4 @@
-"""Typed defaults for the RNN pipeline, read from the environment.
+"""Typed defaults for the LSTM pipeline, read from the environment.
 
 The single source of configuration is the shell config at the repo root
 (``lightning_surrogates/config.sh``). SLURM jobs get it because
@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Identify directories
 SRC_DIR = Path(__file__).resolve().parent
-RNN_DIR = SRC_DIR.parent
+LSTM_DIR = SRC_DIR.parent
 LIGHTNING_SURROGATES_DIR = SRC_DIR.parents[2]
 RESEARCH_DIR = SRC_DIR.parents[3]
 
@@ -65,9 +65,9 @@ DEFAULT_SPLIT_DIR = env_path(
     / env_str("STORAGE_FORMAT", "npy"),
 )
 # Experiment results live inside this model's directory:
-# models/rnn/results/{dataset name}/{sampler}/.
-DEFAULT_RESULTS_ROOT = env_path("RESULTS_ROOT", RNN_DIR / "results")
-CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", f"rnn_{DATASET_NAME}.ckpt")
+# models/lstm/results/{dataset name}/{sampler}/.
+DEFAULT_RESULTS_ROOT = env_path("RESULTS_ROOT", LSTM_DIR / "results")
+CHECKPOINT_NAME = env_str("CHECKPOINT_NAME", f"lstm_{DATASET_NAME}.ckpt")
 
 
 def experiment_relpath(split_dir):
@@ -118,12 +118,13 @@ def resolve_split_dir(dataset_path=None, required=SPLIT_NAMES):
     return path
 
 
-# Model defaults. The RNN keeps the MLP's [phys, abund] -> abund_{t+1} interface
-# but carries a recurrent hidden state across the trajectory. RNN_NUM_LAYERS and
-# RNN_HIDDEN_DIM size the recurrent stack; RNN_CELL_TYPE selects LSTM or GRU.
+# Model defaults. The LSTM keeps the MLP's [phys, abund] -> abund_{t+1}
+# interface but carries a recurrent hidden state across the trajectory.
+# RNN_NUM_LAYERS and RNN_HIDDEN_DIM size the recurrent stack; the cell type is
+# locked to LSTM.
 RNN_NUM_LAYERS = env_int("MODEL_RNN_NUM_LAYERS", 2)
 RNN_HIDDEN_DIM = env_int("MODEL_RNN_HIDDEN_DIM", 256)
-RNN_CELL_TYPE = env_str("MODEL_RNN_CELL_TYPE", "lstm")  # lstm | gru
+RNN_CELL_TYPE = "lstm"  # locked to LSTM
 # Dropout between recurrent layers (PyTorch applies it only when num_layers > 1).
 RNN_DROPOUT = env_float("MODEL_RNN_DROPOUT", 0.0)
 BATCH_SIZE = env_int("MODEL_BATCH_SIZE", 32)
@@ -185,7 +186,7 @@ EARLY_STOPPING_EMA_ALPHA = (
 # Optimization parameters (sequential Optuna study)
 OPTUNA_N_TRIALS = env_int("N_TRIALS", 25)
 OPTUNA_TUNE_EPOCHS = env_int("TUNE_EPOCHS", 50)
-OPTUNA_STUDY_NAME = env_str("STUDY_NAME", f"rnn_{DATASET_NAME}_optimization")
+OPTUNA_STUDY_NAME = env_str("STUDY_NAME", f"lstm_{DATASET_NAME}_optimization")
 OPTUNA_STORAGE = env_str("OPTUNA_STORAGE", "auto")
 OPTUNA_JOURNAL_MODE = env_str("JOURNAL_MODE", "resume")
 OPTUNA_PRUNER_PATIENCE = env_int("PRUNER_PATIENCE", 8)

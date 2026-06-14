@@ -8,12 +8,12 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=24:00:00
-#SBATCH --array=0-4
+#SBATCH --array=0-3
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=nreef@utexas.edu
 
 # Train + test one surrogate variant per array task, in parallel. The array
-# index maps onto MODELS=(t_1_mlp t_20_mlp lstm xlstm rnn) in common.sh.
+# index maps onto MODELS=(t_1_mlp t_20_mlp lstm xlstm) in common.sh.
 # Fixed architecture, no hyperparameter optimization: train.py runs with
 # --use-defaults (built-in defaults, no best_params.json, no Optuna stage).
 #

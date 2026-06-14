@@ -11,11 +11,13 @@ LOSS_FUNCTIONS = {
     "smooth_l1": F.smooth_l1_loss,
 }
 
-RNN_CELLS = {"lstm": nn.LSTM, "gru": nn.GRU}
+# This surrogate is locked to an LSTM cell. The config key ``rnn_cell_type`` is
+# kept for backward compatibility but only accepts "lstm".
+RNN_CELLS = {"lstm": nn.LSTM}
 
 
-class RNN(pl.LightningModule):
-    """Recurrent (LSTM/GRU) one-step surrogate with carried hidden state.
+class LSTM(pl.LightningModule):
+    """LSTM one-step surrogate with carried hidden state.
 
     Input:  [physical parameters at t, log10 abundances at t]
     Output: log10 abundances at t + 1
@@ -45,6 +47,7 @@ class RNN(pl.LightningModule):
         hidden_dim = int(config["rnn_hidden_dim"])
         num_layers = int(config["rnn_num_layers"])
         output_size = int(config["output_size"])
+        # Architecture is locked to LSTM; the only accepted cell type is "lstm".
         self.cell_type = str(config.get("rnn_cell_type", "lstm")).lower()
         dropout = float(config.get("rnn_dropout", 0.0))
         self.learning_rate = float(config.get("learning_rate", 1e-3))
