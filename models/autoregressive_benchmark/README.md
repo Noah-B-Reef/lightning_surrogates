@@ -54,6 +54,6 @@ Each task runs `train.py --use-defaults` (built-in architecture defaults, no
 Optuna) then `test.py` (autoregressive rollout). Results land in
 `results/{dataset}/random/{model}/` (checkpoint + `test_results/`).
 
-**Note:** `lstm` and `xlstm` are scaffolds without `src/` yet, so their tasks
-exit with a clear "not implemented" message until `models/{lstm,xlstm}/src/{train,test}.py`
-are added — at which point they run with no further changes.
+**Note:** `lstm` (index 2) is a scaffold without `src/` yet, so its task
+exits with a clear "not implemented" message until `models/lstm/src/{train,test}.py`
+are added — at which point it runs with no further changes.
